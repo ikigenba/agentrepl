@@ -28,7 +28,7 @@ Build `internal/catalog` as data plus an injected constructor (`ProviderFunc`), 
 
 **Done when:** R-OVEC-4AWS, R-OWM8-I2NH, R-OXU4-VUE6, R-OZ21-9M4V, R-P09X-NDVK, R-P1HU-15M9 are each covered by a clearly-named test and the suite is green.
 
-### Phase 3 — Session log & session-id · ⬜ not started
+### Phase 3 — Session log & session-id · ✅ done
 
 *Realizes design Decision 8 (session log & session-id). Depends on Phase 1.*
 
