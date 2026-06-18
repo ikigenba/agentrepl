@@ -36,7 +36,7 @@ Build `internal/session`: `ID(t)` minting the sub-second timestamp id and `Open(
 
 **Done when:** R-8GF4-LRYU and R-8HN0-ZJPJ are covered by clearly-named tests and the suite is green.
 
-### Phase 4 — Built-in tools (bash / read / write / edit) · ⬜ not started
+### Phase 4 — Built-in tools (bash / read / write / edit) · ✅ done
 
 *Realizes design Decision 10 (built-in tools). Depends on Phase 1.*
 
