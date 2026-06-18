@@ -1,0 +1,6 @@
+{"type":"prompt","text":"hello"}
+{"type":"message_done","message":{"Role":"assistant","Blocks":[{"Text":"Hi there"},{"Opaque":{"signature":"opaque"},"Summary":"checking","BoundToID":"toolu_1"}]}}
+{"type":"tool_use","tool_use":{"ID":"toolu_1","Name":"read","Input":{"path":"missing.txt"}}}
+{"type":"tool_result","tool_result":{"ID":"toolu_1","Name":"read","Output":"open missing.txt: no such file","IsError":true}}
+{"type":"usage","usage":{"InputUncached":123,"CacheReadInput":10,"CacheWriteInput":5,"CacheWrite5m":0,"CacheWrite1h":0,"Output":456,"ReasoningOutput":78,"Total":999},"turn_cost_usd":"0.001234","session_cost_usd":"0.005678"}
+{"type":"summary","usage":{"InputUncached":223,"CacheReadInput":20,"CacheWriteInput":15,"CacheWrite5m":0,"CacheWrite1h":0,"Output":556,"ReasoningOutput":88,"Total":1111},"session_cost_usd":"0.006789"}

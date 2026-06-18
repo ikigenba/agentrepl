@@ -52,7 +52,7 @@ Build `internal/config`: the `Target` struct, the explicit typed key table (`map
 
 **Done when:** R-LYK7-Y7ZS, R-LZS4-BZQH, R-M100-PRH6, R-M27X-3J7V, R-M3FT-HAYK, R-M4NP-V2P9, R-M5VM-8UFY are covered by clearly-named tests and the suite is green.
 
-### Phase 6 — Renderer (decorated & raw) + usage/cost formatting · ⬜ not started
+### Phase 6 — Renderer (decorated & raw) + usage/cost formatting · ✅ done
 
 *Realizes design Decision 5 (turn execution, the Renderer, and color) — presentation half — and Decision 7 (usage & cost reporting) — format half. Depends on Phase 1.*
 

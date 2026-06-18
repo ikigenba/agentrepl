@@ -1,0 +1,4 @@
+<ESC>[1myou ›<ESC>[0m hello
+<ESC>[32massistant ›<ESC>[0m Hi
+<ESC>[31mtool error ›<ESC>[0m read: missing
+<ESC>[31merror ›<ESC>[0m boom

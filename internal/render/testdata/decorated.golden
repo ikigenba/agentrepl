@@ -1,0 +1,13 @@
+you › hello
+reasoning › checking
+─
+assistant › Hi there
+─
+tool call › read {"path":"missing.txt"}
+tool result › read: contents
+tool error › read: open missing.txt: no such file
+· tokens  in=123 cache(r=10 w=5) out=456 reasoning=78 total=999
+· cost     $0.001234 turn   $0.005678 session
+summary
+· tokens  in=223 cache(r=20 w=15) out=556 reasoning=88 total=1111
+· cost     $0.006789 session
