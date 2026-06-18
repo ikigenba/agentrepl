@@ -1,0 +1,420 @@
+package config
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/ikigenba/agentkit"
+	"github.com/ikigenba/agentrepl/internal/catalog"
+)
+
+func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
+	// R-LYK7-Y7ZS
+	cases := []struct {
+		key    string
+		raw    string
+		assert func(*testing.T, *Target)
+	}{
+		{
+			key: "provider",
+			raw: "test",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Provider == nil || target.Conv.Provider.Name() != "test" {
+					t.Fatalf("provider = %v, want named provider", target.Conv.Provider)
+				}
+			},
+		},
+		{
+			key: "model",
+			raw: "loose-model",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Model != "loose-model" {
+					t.Fatalf("model = %q, want loose-model", target.Conv.Model)
+				}
+			},
+		},
+		{
+			key: "system",
+			raw: "be concise",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.System != "be concise" {
+					t.Fatalf("system = %q, want be concise", target.Conv.System)
+				}
+			},
+		},
+		{
+			key: "gen.temperature",
+			raw: "0.25",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Gen.Temperature == nil || *target.Conv.Gen.Temperature != 0.25 {
+					t.Fatalf("temperature = %v, want 0.25", target.Conv.Gen.Temperature)
+				}
+			},
+		},
+		{
+			key: "gen.top_p",
+			raw: "0.9",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Gen.TopP == nil || *target.Conv.Gen.TopP != 0.9 {
+					t.Fatalf("top_p = %v, want 0.9", target.Conv.Gen.TopP)
+				}
+			},
+		},
+		{
+			key: "gen.max_tokens",
+			raw: "2048",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Gen.MaxTokens != 2048 {
+					t.Fatalf("max_tokens = %d, want 2048", target.Conv.Gen.MaxTokens)
+				}
+			},
+		},
+		{
+			key: "gen.reasoning",
+			raw: "medium",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Gen.Reasoning != agentkit.EffortMedium {
+					t.Fatalf("reasoning = %v, want medium", target.Conv.Gen.Reasoning)
+				}
+			},
+		},
+		{
+			key: "retry.max_attempts",
+			raw: "5",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Retry.MaxAttempts != 5 {
+					t.Fatalf("max_attempts = %d, want 5", target.Conv.Retry.MaxAttempts)
+				}
+			},
+		},
+		{
+			key: "retry.base_delay",
+			raw: "500ms",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Retry.BaseDelay != 500*time.Millisecond {
+					t.Fatalf("base_delay = %v, want 500ms", target.Conv.Retry.BaseDelay)
+				}
+			},
+		},
+		{
+			key: "retry.max_delay",
+			raw: "3s",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Retry.MaxDelay != 3*time.Second {
+					t.Fatalf("max_delay = %v, want 3s", target.Conv.Retry.MaxDelay)
+				}
+			},
+		},
+		{
+			key: "retry.max_elapsed",
+			raw: "1m30s",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Retry.MaxElapsed != 90*time.Second {
+					t.Fatalf("max_elapsed = %v, want 1m30s", target.Conv.Retry.MaxElapsed)
+				}
+			},
+		},
+		{
+			key: "retry.ignore_retry_after",
+			raw: "true",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if !target.Conv.Retry.IgnoreRetryAfter {
+					t.Fatal("ignore_retry_after = false, want true")
+				}
+			},
+		},
+		{
+			key: "tool_loop_limit",
+			raw: "12",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.MaxToolIterations != 12 {
+					t.Fatalf("tool_loop_limit = %d, want 12", target.Conv.MaxToolIterations)
+				}
+			},
+		},
+	}
+
+	if len(cases) != len(Keys()) {
+		t.Fatalf("coercion cases = %d, want one per key: %v", len(cases), Keys())
+	}
+	seen := map[string]bool{}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			seen[tc.key] = true
+			target := newTarget()
+			if err := Set(target, tc.key, tc.raw); err != nil {
+				t.Fatalf("Set(%q, %q) returned error: %v", tc.key, tc.raw, err)
+			}
+			tc.assert(t, target)
+		})
+	}
+	for _, key := range Keys() {
+		if !seen[key] {
+			t.Fatalf("missing coercion case for %s", key)
+		}
+	}
+}
+
+func TestUnknownKeyWrapsSentinelAndMutatesNothing(t *testing.T) {
+	// R-LZS4-BZQH
+	target := newTarget()
+	target.Conv.System = "original"
+	before := *target.Conv
+
+	err := Set(target, "missing.key", "value")
+	if !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("Set unknown key error = %v, want ErrUnknownKey", err)
+	}
+	if !strings.Contains(err.Error(), "missing.key") {
+		t.Fatalf("unknown key error = %q, want key name", err)
+	}
+	if !reflect.DeepEqual(before, *target.Conv) {
+		t.Fatalf("conversation mutated: before=%#v after=%#v", before, *target.Conv)
+	}
+}
+
+func TestBadValueWrapsSentinelNamesKeyAndMutatesNothing(t *testing.T) {
+	// R-M100-PRH6
+	target := newTarget()
+	target.Conv.Gen.MaxTokens = 77
+	before := *target.Conv
+
+	err := Set(target, "gen.max_tokens", "not-an-int")
+	if !errors.Is(err, ErrBadValue) {
+		t.Fatalf("Set bad value error = %v, want ErrBadValue", err)
+	}
+	if !strings.Contains(err.Error(), "gen.max_tokens") || !strings.Contains(err.Error(), "invalid syntax") {
+		t.Fatalf("bad value error = %q, want key and parse reason", err)
+	}
+	if !reflect.DeepEqual(before, *target.Conv) {
+		t.Fatalf("conversation mutated: before=%#v after=%#v", before, *target.Conv)
+	}
+}
+
+func TestDefaultResetsUnsetValuesAndRendersDefault(t *testing.T) {
+	// R-M27X-3J7V
+	target := newTarget()
+	if err := Set(target, "gen.temperature", "0.8"); err != nil {
+		t.Fatalf("set temperature: %v", err)
+	}
+	if err := Set(target, "gen.reasoning", "high"); err != nil {
+		t.Fatalf("set reasoning: %v", err)
+	}
+
+	if err := Set(target, "gen.temperature", "default"); err != nil {
+		t.Fatalf("default temperature: %v", err)
+	}
+	if err := Set(target, "gen.reasoning", "default"); err != nil {
+		t.Fatalf("default reasoning: %v", err)
+	}
+
+	if target.Conv.Gen.Temperature != nil {
+		t.Fatalf("temperature = %v, want nil", target.Conv.Gen.Temperature)
+	}
+	if target.Conv.Gen.Reasoning != agentkit.EffortDefault {
+		t.Fatalf("reasoning = %v, want default", target.Conv.Gen.Reasoning)
+	}
+	for _, key := range []string{"gen.temperature", "gen.reasoning"} {
+		got, ok := Get(target, key)
+		if !ok || got != "default" {
+			t.Fatalf("Get(%q) = %q, %v; want default, true", key, got, ok)
+		}
+		line := key + "=default"
+		if !slices.Contains(Dump(target), line) {
+			t.Fatalf("Dump missing %q: %v", line, Dump(target))
+		}
+	}
+}
+
+func TestProviderAndModelCouplingUsesCatalogErrors(t *testing.T) {
+	// R-M3FT-HAYK
+	t.Run("provider builds through catalog", func(t *testing.T) {
+		target := newTarget()
+		if err := Set(target, "provider", "test"); err != nil {
+			t.Fatalf("Set provider returned error: %v", err)
+		}
+		if target.Conv.Provider == nil || target.Conv.Provider.Name() != "test" {
+			t.Fatalf("provider = %v, want constructed test provider", target.Conv.Provider)
+		}
+	})
+
+	t.Run("provider unknown", func(t *testing.T) {
+		target := newTarget()
+		err := Set(target, "provider", "absent")
+		if !errors.Is(err, catalog.ErrUnknownProvider) {
+			t.Fatalf("Set unknown provider error = %v, want ErrUnknownProvider", err)
+		}
+		if target.Conv.Provider != nil {
+			t.Fatalf("provider = %v, want nil", target.Conv.Provider)
+		}
+	})
+
+	t.Run("provider missing key", func(t *testing.T) {
+		target := newTarget()
+		target.Getenv = func(string) string { return "" }
+		err := Set(target, "provider", "test")
+		if !errors.Is(err, catalog.ErrMissingKey) {
+			t.Fatalf("Set provider without key error = %v, want ErrMissingKey", err)
+		}
+		if !strings.Contains(err.Error(), "TEST_API_KEY") {
+			t.Fatalf("missing key error = %q, want env key", err)
+		}
+		if target.Conv.Provider != nil {
+			t.Fatalf("provider = %v, want nil", target.Conv.Provider)
+		}
+	})
+
+	t.Run("model validates against current provider", func(t *testing.T) {
+		target := newTarget()
+		if err := Set(target, "provider", "test"); err != nil {
+			t.Fatalf("Set provider returned error: %v", err)
+		}
+		if err := Set(target, "model", "model-a"); err != nil {
+			t.Fatalf("Set valid model returned error: %v", err)
+		}
+		err := Set(target, "model", "model-z")
+		if !errors.Is(err, catalog.ErrUnknownModel) {
+			t.Fatalf("Set invalid model error = %v, want ErrUnknownModel", err)
+		}
+		if !strings.Contains(err.Error(), "choose from: model-a, model-b") {
+			t.Fatalf("invalid model error = %q, want choices", err)
+		}
+		if target.Conv.Model != "model-a" {
+			t.Fatalf("model = %q, want previous valid model", target.Conv.Model)
+		}
+	})
+}
+
+func TestDumpReturnsAllKeysSortedWithCurrentValues(t *testing.T) {
+	// R-M4NP-V2P9
+	target := newTarget()
+	for _, pair := range []struct {
+		key string
+		raw string
+	}{
+		{key: "provider", raw: "test"},
+		{key: "model", raw: "model-b"},
+		{key: "system", raw: "steady"},
+		{key: "gen.temperature", raw: "0.2"},
+		{key: "retry.base_delay", raw: "750ms"},
+		{key: "tool_loop_limit", raw: "9"},
+	} {
+		if err := Set(target, pair.key, pair.raw); err != nil {
+			t.Fatalf("Set(%q): %v", pair.key, err)
+		}
+	}
+
+	got := Dump(target)
+	want := []string{
+		"gen.max_tokens=default",
+		"gen.reasoning=default",
+		"gen.temperature=0.2",
+		"gen.top_p=default",
+		"model=model-b",
+		"provider=test",
+		"retry.base_delay=750ms",
+		"retry.ignore_retry_after=default",
+		"retry.max_attempts=default",
+		"retry.max_delay=default",
+		"retry.max_elapsed=default",
+		"system=steady",
+		"tool_loop_limit=9",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Dump() = %#v, want %#v", got, want)
+	}
+	if !slices.IsSorted(got) {
+		t.Fatalf("Dump() is not sorted: %v", got)
+	}
+}
+
+func TestParsePairAndDirectSetReachIdenticalState(t *testing.T) {
+	// R-M5VM-8UFY
+	fromFlag := newTarget()
+	key, value, err := ParsePair("system=a=b")
+	if err != nil {
+		t.Fatalf("ParsePair returned error: %v", err)
+	}
+	if key != "system" || value != "a=b" {
+		t.Fatalf("ParsePair = %q, %q; want system, a=b", key, value)
+	}
+	if err := Set(fromFlag, key, value); err != nil {
+		t.Fatalf("Set from ParsePair returned error: %v", err)
+	}
+
+	direct := newTarget()
+	if err := Set(direct, "system", "a=b"); err != nil {
+		t.Fatalf("direct Set returned error: %v", err)
+	}
+
+	if !reflect.DeepEqual(Dump(fromFlag), Dump(direct)) {
+		t.Fatalf("ParsePair+Set dump = %v, direct Set dump = %v", Dump(fromFlag), Dump(direct))
+	}
+	if _, _, err := ParsePair("missing-separator"); !errors.Is(err, ErrBadValue) {
+		t.Fatalf("ParsePair missing separator error = %v, want ErrBadValue", err)
+	}
+}
+
+func newTarget() *Target {
+	return &Target{
+		Conv: &agentkit.Conversation{},
+		Catalog: []catalog.Provider{
+			{
+				Name:   "test",
+				EnvKey: "TEST_API_KEY",
+				Models: []string{
+					"model-a",
+					"model-b",
+				},
+				New: func(string) agentkit.Provider {
+					return fakeProvider{name: "test"}
+				},
+			},
+		},
+		Getenv: func(key string) string {
+			if key == "TEST_API_KEY" {
+				return "test-key"
+			}
+			return ""
+		},
+	}
+}
+
+type fakeProvider struct {
+	name string
+}
+
+func (p fakeProvider) RoundTrip(context.Context, *agentkit.Request) *agentkit.RoundTrip {
+	return nil
+}
+
+func (p fakeProvider) Name() string {
+	return p.name
+}
+
+func (p fakeProvider) Pricing(model string) (agentkit.Pricing, bool) {
+	switch model {
+	case "model-a", "model-b":
+		return agentkit.Pricing{}, true
+	default:
+		return agentkit.Pricing{}, false
+	}
+}

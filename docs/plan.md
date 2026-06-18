@@ -44,7 +44,7 @@ Build `internal/tools`: `All()` returning the four `agentkit.NewTool[In]` tools 
 
 **Done when:** R-NHBW-446N, R-NIJS-HVXC, R-NKZL-9FEQ, R-NM7H-N75F, R-NNFE-0YW4, R-NONA-EQMT are covered by clearly-named tests and the suite is green.
 
-### Phase 5 — Config-key namespace & coercion · ⬜ not started
+### Phase 5 — Config-key namespace & coercion · ✅ done
 
 *Realizes design Decision 3 (config-key namespace & coercion). Depends on Phase 2 (catalog interface) and Phase 1.*
 
