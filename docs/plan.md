@@ -98,7 +98,7 @@ Flesh out `cmd/agentrepl/main.go` into the real composition root and wire SIGINT
 - Decision 11 — R-H9XM-D78S, R-HB5I-QYZH, R-HCDF-4QQ6.
 - Decision 7 — R-OPZQ-Y90U (the *interrupted-turn* case, completing the id begun in Phase 7).
 
-### Phase 9 — Makefile (build / fmt / test / install / clean) · ⬜ not started
+### Phase 9 — Makefile (build / fmt / test / install / clean) · ✅ done
 
 *Realizes no design Decision — build tooling. Depends on Phase 8.*
 
