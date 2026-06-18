@@ -62,7 +62,7 @@ This phase owns the **format/presentation** ids of D5 and D7. The driver-side id
 
 **Done when:** R-LL9K-SKDQ, R-LMHH-6C4F, R-LNPD-K3V4, R-LOX9-XVLT, R-LRD2-PF37 (Decision 5, render side) and R-ONJY-6PJG, R-OORU-KHA5, R-OR7N-C0RJ, R-OW38-V3QB (Decision 7, render side) are covered by clearly-named tests (goldens where the format is pinned) and the suite is green.
 
-### Phase 7a — REPL launch surface, loop & command dispatch (no live turn) · ⬜ not started
+### Phase 7a — REPL launch surface, loop & command dispatch (no live turn) · ✅ done
 
 *Realizes design Decision 4 (CLI flags), Decision 9 (slash-command dispatch & command set, the non-turn half), and Decision 11 (resilience, the command/config in-loop half). Depends on Phases 2, 3, 4, 5, 6.*
 
