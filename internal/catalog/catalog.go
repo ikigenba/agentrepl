@@ -1,5 +1,111 @@
 package catalog
 
-import "github.com/ikigenba/agentkit"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/ikigenba/agentkit"
+	"github.com/ikigenba/agentkit/anthropic"
+	"github.com/ikigenba/agentkit/google"
+	"github.com/ikigenba/agentkit/openai"
+	"github.com/ikigenba/agentkit/zai"
+)
 
 type ProviderFunc func(apiKey string) agentkit.Provider
+
+type Provider struct {
+	Name   string
+	EnvKey string
+	Models []string
+	New    ProviderFunc
+}
+
+var (
+	ErrUnknownProvider = errors.New("unknown provider")
+	ErrUnknownModel    = errors.New("unknown model for provider")
+	ErrMissingKey      = errors.New("missing API key")
+)
+
+func Default() []Provider {
+	return []Provider{
+		{
+			Name:   "anthropic",
+			EnvKey: "ANTHROPIC_API_KEY",
+			Models: []string{
+				anthropic.ModelOpus48,
+				anthropic.ModelSonnet46,
+				anthropic.ModelHaiku45,
+			},
+			New: func(apiKey string) agentkit.Provider {
+				return anthropic.New(apiKey)
+			},
+		},
+		{
+			Name:   "google",
+			EnvKey: "GEMINI_API_KEY",
+			Models: []string{
+				google.ModelFlash25,
+				google.ModelPro25,
+				google.ModelFlash35,
+				google.ModelLite31,
+				google.ModelPro31Preview,
+			},
+			New: func(apiKey string) agentkit.Provider {
+				return google.New(apiKey)
+			},
+		},
+		{
+			Name:   "openai",
+			EnvKey: "OPENAI_API_KEY",
+			Models: []string{
+				openai.ModelGPT55Pro,
+				openai.ModelGPT55,
+				openai.ModelGPT54,
+				openai.ModelGPT54Mini,
+				openai.ModelGPT54Nano,
+			},
+			New: func(apiKey string) agentkit.Provider {
+				return openai.New(apiKey)
+			},
+		},
+		{
+			Name:   "zai",
+			EnvKey: "ZAI_API_KEY",
+			Models: []string{
+				zai.ModelGLM52,
+				zai.ModelGLM51,
+				zai.ModelGLM47,
+				zai.ModelGLM46,
+			},
+			New: func(apiKey string) agentkit.Provider {
+				return zai.New(apiKey)
+			},
+		},
+	}
+}
+
+func Lookup(cat []Provider, name string) (Provider, bool) {
+	for _, p := range cat {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return Provider{}, false
+}
+
+func (p Provider) HasModel(model string) bool {
+	for _, candidate := range p.Models {
+		if candidate == model {
+			return true
+		}
+	}
+	return false
+}
+
+func (p Provider) Build(getenv func(string) string) (agentkit.Provider, error) {
+	apiKey := getenv(p.EnvKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("%w: %s", ErrMissingKey, p.EnvKey)
+	}
+	return p.New(apiKey), nil
+}

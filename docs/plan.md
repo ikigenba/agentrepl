@@ -20,7 +20,7 @@ Stand up the buildable, testable skeleton from Decision 1's layout. The module `
 
 **Done when:** `go build ./...`, `go vet ./...`, `go test ./...` exit 0 and `gofmt -l .` is empty. Decision 1 mints no requirement ids (it is a pure structural decision); this phase's bar is the green suite over the skeleton, and it is the substrate every later phase's ids are proven on.
 
-### Phase 2 — Provider & model catalog · ⬜ not started
+### Phase 2 — Provider & model catalog · ✅ done
 
 *Realizes design Decision 2 (provider & model catalog). Depends on Phase 1.*
 
