@@ -13,9 +13,10 @@ import (
 )
 
 type Target struct {
-	Conv    *agentkit.Conversation
-	Catalog []catalog.Provider
-	Getenv  func(string) string
+	Conv       *agentkit.Conversation
+	Catalog    []catalog.Provider
+	Getenv     func(string) string
+	ZaiBaseURL string
 }
 
 var (
@@ -26,7 +27,7 @@ var (
 type field struct {
 	set   func(*Target, string) error
 	get   func(*Target) string
-	reset func(*Target)
+	reset func(*Target) error
 }
 
 const defaultValue = "default"
@@ -38,7 +39,7 @@ var fields = map[string]field{
 			if !ok {
 				return fmt.Errorf("%w: %q", catalog.ErrUnknownProvider, raw)
 			}
-			provider, err := p.Build(getenv(t))
+			provider, err := p.Build(getenv(t), optionsFor(t, p))
 			if err != nil {
 				return fmt.Errorf("provider %q: %w", raw, err)
 			}
@@ -51,7 +52,10 @@ var fields = map[string]field{
 			}
 			return t.Conv.Provider.Name()
 		},
-		reset: func(t *Target) { t.Conv.Provider = nil },
+		reset: func(t *Target) error {
+			t.Conv.Provider = nil
+			return nil
+		},
 	},
 	"model": {
 		set: func(t *Target, raw string) error {
@@ -74,7 +78,10 @@ var fields = map[string]field{
 			}
 			return t.Conv.Model
 		},
-		reset: func(t *Target) { t.Conv.Model = "" },
+		reset: func(t *Target) error {
+			t.Conv.Model = ""
+			return nil
+		},
 	},
 	"system": {
 		set: func(t *Target, raw string) error {
@@ -87,7 +94,10 @@ var fields = map[string]field{
 			}
 			return t.Conv.System
 		},
-		reset: func(t *Target) { t.Conv.System = "" },
+		reset: func(t *Target) error {
+			t.Conv.System = ""
+			return nil
+		},
 	},
 	"gen.temperature": floatField(
 		func(c *agentkit.Conversation) **float64 { return &c.Gen.Temperature },
@@ -113,7 +123,10 @@ var fields = map[string]field{
 			}
 			return formatReasoning(t.Conv.Gen.Reasoning)
 		},
-		reset: func(t *Target) { t.Conv.Gen.Reasoning = agentkit.EffortDefault },
+		reset: func(t *Target) error {
+			t.Conv.Gen.Reasoning = agentkit.EffortDefault
+			return nil
+		},
 	},
 	"retry.max_attempts": intField(
 		func(c *agentkit.Conversation) *int { return &c.Retry.MaxAttempts },
@@ -133,6 +146,20 @@ var fields = map[string]field{
 	"tool_loop_limit": intField(
 		func(c *agentkit.Conversation) *int { return &c.MaxToolIterations },
 	),
+	"zai.base_url": {
+		set: func(t *Target, raw string) error {
+			return setZaiBaseURL(t, raw)
+		},
+		get: func(t *Target) string {
+			if t == nil || t.ZaiBaseURL == "" {
+				return defaultValue
+			}
+			return t.ZaiBaseURL
+		},
+		reset: func(t *Target) error {
+			return setZaiBaseURL(t, "")
+		},
+	},
 }
 
 func Set(t *Target, key, raw string) error {
@@ -144,8 +171,7 @@ func Set(t *Target, key, raw string) error {
 		return fmt.Errorf("%w: %s: missing target conversation", ErrBadValue, key)
 	}
 	if raw == defaultValue {
-		f.reset(t)
-		return nil
+		return f.reset(t)
 	}
 	if err := f.set(t, raw); err != nil {
 		if errors.Is(err, ErrBadValue) {
@@ -207,7 +233,10 @@ func floatField(ptr func(*agentkit.Conversation) **float64) field {
 			}
 			return strconv.FormatFloat(**ptr(t.Conv), 'g', -1, 64)
 		},
-		reset: func(t *Target) { *ptr(t.Conv) = nil },
+		reset: func(t *Target) error {
+			*ptr(t.Conv) = nil
+			return nil
+		},
 	}
 }
 
@@ -227,7 +256,10 @@ func intField(ptr func(*agentkit.Conversation) *int) field {
 			}
 			return strconv.Itoa(*ptr(t.Conv))
 		},
-		reset: func(t *Target) { *ptr(t.Conv) = 0 },
+		reset: func(t *Target) error {
+			*ptr(t.Conv) = 0
+			return nil
+		},
 	}
 }
 
@@ -247,7 +279,10 @@ func durationField(ptr func(*agentkit.Conversation) *time.Duration) field {
 			}
 			return ptr(t.Conv).String()
 		},
-		reset: func(t *Target) { *ptr(t.Conv) = 0 },
+		reset: func(t *Target) error {
+			*ptr(t.Conv) = 0
+			return nil
+		},
 	}
 }
 
@@ -267,7 +302,10 @@ func boolField(ptr func(*agentkit.Conversation) *bool) field {
 			}
 			return strconv.FormatBool(*ptr(t.Conv))
 		},
-		reset: func(t *Target) { *ptr(t.Conv) = false },
+		reset: func(t *Target) error {
+			*ptr(t.Conv) = false
+			return nil
+		},
 	}
 }
 
@@ -316,4 +354,27 @@ func getenv(t *Target) func(string) string {
 		return t.Getenv
 	}
 	return func(string) string { return "" }
+}
+
+func optionsFor(t *Target, p catalog.Provider) catalog.Options {
+	if p.Name == "zai" {
+		return catalog.Options{BaseURL: t.ZaiBaseURL}
+	}
+	return catalog.Options{}
+}
+
+func setZaiBaseURL(t *Target, raw string) error {
+	if t.Conv.Provider != nil && t.Conv.Provider.Name() == "zai" {
+		p, ok := catalog.Lookup(t.Catalog, "zai")
+		if !ok {
+			return fmt.Errorf("%w: %q", catalog.ErrUnknownProvider, "zai")
+		}
+		provider, err := p.Build(getenv(t), catalog.Options{BaseURL: raw})
+		if err != nil {
+			return fmt.Errorf("provider %q: %w", "zai", err)
+		}
+		t.Conv.Provider = provider
+	}
+	t.ZaiBaseURL = raw
+	return nil
 }

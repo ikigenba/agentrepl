@@ -3,10 +3,16 @@ package catalog
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/ikigenba/agentkit"
+	"github.com/ikigenba/agentkit/anthropic"
+	"github.com/ikigenba/agentkit/google"
+	"github.com/ikigenba/agentkit/openai"
+	"github.com/ikigenba/agentkit/zai"
 )
 
 type fakeProvider struct {
@@ -58,7 +64,7 @@ func TestDefaultProvidersHaveContractualNamesEnvKeysAndModels(t *testing.T) {
 func TestDefaultModelsAreAcceptedByConstructedProviderPricing(t *testing.T) {
 	// R-OWM8-I2NH
 	for _, provider := range Default() {
-		constructed := provider.New("test-key")
+		constructed := provider.New("test-key", Options{})
 		if constructed == nil {
 			t.Fatalf("%s constructor returned nil", provider.Name)
 		}
@@ -76,13 +82,13 @@ func TestBuildMissingKeyWrapsSentinelNamesEnvAndDoesNotConstruct(t *testing.T) {
 	provider := Provider{
 		Name:   "test",
 		EnvKey: "TEST_API_KEY",
-		New: func(string) agentkit.Provider {
+		New: func(string, Options) agentkit.Provider {
 			calls++
 			return fakeProvider{name: "test"}
 		},
 	}
 
-	got, err := provider.Build(func(string) string { return "" })
+	got, err := provider.Build(func(string) string { return "" }, Options{})
 	if got != nil {
 		t.Fatalf("Build returned provider %#v, want nil", got)
 	}
@@ -100,12 +106,14 @@ func TestBuildMissingKeyWrapsSentinelNamesEnvAndDoesNotConstruct(t *testing.T) {
 func TestBuildConstructsProviderWhenKeyIsPresent(t *testing.T) {
 	// R-P09X-NDVK
 	var gotKey string
+	var gotOptions Options
 	wantProvider := fakeProvider{name: "test"}
 	provider := Provider{
 		Name:   "test",
 		EnvKey: "TEST_API_KEY",
-		New: func(apiKey string) agentkit.Provider {
+		New: func(apiKey string, opts Options) agentkit.Provider {
 			gotKey = apiKey
+			gotOptions = opts
 			return wantProvider
 		},
 	}
@@ -115,7 +123,7 @@ func TestBuildConstructsProviderWhenKeyIsPresent(t *testing.T) {
 			t.Fatalf("getenv key = %q, want %q", key, provider.EnvKey)
 		}
 		return "secret"
-	})
+	}, Options{BaseURL: "https://example.test"})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
@@ -127,6 +135,71 @@ func TestBuildConstructsProviderWhenKeyIsPresent(t *testing.T) {
 	}
 	if gotKey != "secret" {
 		t.Fatalf("constructor apiKey = %q, want %q", gotKey, "secret")
+	}
+	if gotOptions.BaseURL != "https://example.test" {
+		t.Fatalf("constructor options BaseURL = %q, want override", gotOptions.BaseURL)
+	}
+}
+
+func TestBuildOptionsApplyOnlyToZAIBaseURL(t *testing.T) {
+	// R-S94E-8K1O
+	transport := &recordingTransport{}
+	original := http.DefaultTransport
+	http.DefaultTransport = transport
+	t.Cleanup(func() { http.DefaultTransport = original })
+
+	overrideRoot := "https://override.example.test/root"
+	cases := []struct {
+		name             string
+		model            string
+		wantOverrideRoot bool
+	}{
+		{name: "anthropic", model: anthropic.ModelHaiku45},
+		{name: "google", model: google.ModelFlash25},
+		{name: "openai", model: openai.ModelGPT54Nano},
+		{name: "zai", model: zai.ModelGLM46, wantOverrideRoot: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider, ok := Lookup(Default(), tc.name)
+			if !ok {
+				t.Fatalf("Lookup(%q) ok=false", tc.name)
+			}
+			constructed, err := provider.Build(func(string) string { return "test-key" }, Options{BaseURL: overrideRoot})
+			if err != nil {
+				t.Fatalf("Build returned error: %v", err)
+			}
+			before := len(transport.urls)
+			rt := constructed.RoundTrip(context.Background(), &agentkit.Request{Model: tc.model})
+			if rt == nil {
+				t.Fatal("RoundTrip returned nil")
+			}
+			if len(transport.urls) != before+1 {
+				t.Fatalf("recorded URLs = %v, want one new request", transport.urls)
+			}
+			got := transport.urls[len(transport.urls)-1]
+			gotOverride := strings.HasPrefix(got, overrideRoot+"/")
+			if gotOverride != tc.wantOverrideRoot {
+				t.Fatalf("%s requested %q, override root used=%v want %v", tc.name, got, gotOverride, tc.wantOverrideRoot)
+			}
+		})
+	}
+
+	provider, ok := Lookup(Default(), "zai")
+	if !ok {
+		t.Fatal("Lookup(zai) ok=false")
+	}
+	constructed, err := provider.Build(func(string) string { return "test-key" }, Options{})
+	if err != nil {
+		t.Fatalf("Build zai default returned error: %v", err)
+	}
+	before := len(transport.urls)
+	_ = constructed.RoundTrip(context.Background(), &agentkit.Request{Model: zai.ModelGLM46})
+	if len(transport.urls) != before+1 {
+		t.Fatalf("recorded URLs = %v, want one new request", transport.urls)
+	}
+	if strings.HasPrefix(transport.urls[len(transport.urls)-1], overrideRoot+"/") {
+		t.Fatalf("zai default requested override URL %q", transport.urls[len(transport.urls)-1])
 	}
 }
 
@@ -146,4 +219,18 @@ func TestLookupAndHasModelReportMembership(t *testing.T) {
 	if provider.HasModel("not-a-curated-model") {
 		t.Fatal("HasModel(not-a-curated-model) = true, want false")
 	}
+}
+
+type recordingTransport struct {
+	urls []string
+}
+
+func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.urls = append(t.urls, req.URL.String())
+	return &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"stop"}}`)),
+		Request:    req,
+	}, nil
 }

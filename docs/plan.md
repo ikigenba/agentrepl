@@ -114,7 +114,7 @@ Use `BINARY := agentrepl`, `BIN_DIR := bin`, `PREFIX ?= $(HOME)/.local`, and a `
 
 **Done when:** the `Makefile` exists at the repo root; `make` (default) builds `bin/agentrepl`, `make fmt`/`make test` run gofmt/the tests, `make install` places the binary at `~/.local/bin/agentrepl` (via the default `PREFIX`), and `make clean` removes the build artifacts — and the suite (per design's *Conventions*) is green.
 
-### Phase 10 — Configurable Z.ai base URL (`-c zai.base_url=…`)
+### Phase 10 — Configurable Z.ai base URL (`-c zai.base_url=…`) · ✅ done
 
 *Realizes design Decision 2 (the `Options` construction-override seam) and Decision 3 (the `zai.base_url` key and its order-independent provider-build coupling). Depends on Phase 2 (catalog) and Phase 5 (config).*
 

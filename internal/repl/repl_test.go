@@ -536,7 +536,7 @@ func TestCommandTableSetPropagatesConfigSentinels(t *testing.T) {
 			Catalog: []catalog.Provider{{
 				Name:   "test",
 				EnvKey: "TEST_KEY",
-				New: func(string) agentkit.Provider {
+				New: func(string, catalog.Options) agentkit.Provider {
 					t.Fatal("constructor should not be called for unknown provider")
 					return nil
 				},
@@ -586,7 +586,7 @@ func runScriptWithProvider(t *testing.T, script string, opts Options, provider *
 			Name:   "test",
 			EnvKey: "TEST_API_KEY",
 			Models: []string{"test-model"},
-			New: func(string) agentkit.Provider {
+			New: func(string, catalog.Options) agentkit.Provider {
 				return provider
 			},
 		}}
@@ -646,7 +646,7 @@ func runScriptWithProviderContext(t *testing.T, ctx context.Context, script stri
 			Name:   "test",
 			EnvKey: "TEST_API_KEY",
 			Models: []string{"test-model"},
-			New: func(string) agentkit.Provider {
+			New: func(string, catalog.Options) agentkit.Provider {
 				return provider
 			},
 		}}

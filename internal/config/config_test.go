@@ -150,6 +150,16 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 				}
 			},
 		},
+		{
+			key: "zai.base_url",
+			raw: "https://api.z.ai/api/coding/paas/v4",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.ZaiBaseURL != "https://api.z.ai/api/coding/paas/v4" {
+					t.Fatalf("ZaiBaseURL = %q, want override", target.ZaiBaseURL)
+				}
+			},
+		},
 	}
 
 	if len(cases) != len(Keys()) {
@@ -316,6 +326,7 @@ func TestDumpReturnsAllKeysSortedWithCurrentValues(t *testing.T) {
 		{key: "gen.temperature", raw: "0.2"},
 		{key: "retry.base_delay", raw: "750ms"},
 		{key: "tool_loop_limit", raw: "9"},
+		{key: "zai.base_url", raw: "https://api.z.ai/api/coding/paas/v4"},
 	} {
 		if err := Set(target, pair.key, pair.raw); err != nil {
 			t.Fatalf("Set(%q): %v", pair.key, err)
@@ -337,6 +348,7 @@ func TestDumpReturnsAllKeysSortedWithCurrentValues(t *testing.T) {
 		"retry.max_elapsed=default",
 		"system=steady",
 		"tool_loop_limit=9",
+		"zai.base_url=https://api.z.ai/api/coding/paas/v4",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Dump() = %#v, want %#v", got, want)
@@ -344,6 +356,84 @@ func TestDumpReturnsAllKeysSortedWithCurrentValues(t *testing.T) {
 	if !slices.IsSorted(got) {
 		t.Fatalf("Dump() is not sorted: %v", got)
 	}
+}
+
+func TestZAIBaseURLStoresAndRebuildsOrderIndependently(t *testing.T) {
+	// R-SCS3-DV9R
+	override := "https://api.z.ai/api/coding/paas/v4"
+
+	t.Run("base URL before provider", func(t *testing.T) {
+		target := newZAITarget()
+		if err := Set(target, "zai.base_url", override); err != nil {
+			t.Fatalf("Set zai.base_url returned error: %v", err)
+		}
+		if target.Conv.Provider != nil {
+			t.Fatalf("provider = %v, want nil before provider selection", target.Conv.Provider)
+		}
+		if err := Set(target, "provider", "zai"); err != nil {
+			t.Fatalf("Set provider returned error: %v", err)
+		}
+		if got := providerBaseURL(t, target.Conv.Provider); got != override {
+			t.Fatalf("provider baseURL = %q, want %q", got, override)
+		}
+	})
+
+	t.Run("provider before base URL", func(t *testing.T) {
+		target := newZAITarget()
+		if err := Set(target, "provider", "zai"); err != nil {
+			t.Fatalf("Set provider returned error: %v", err)
+		}
+		if got := providerBaseURL(t, target.Conv.Provider); got != "" {
+			t.Fatalf("initial provider baseURL = %q, want default", got)
+		}
+		if err := Set(target, "zai.base_url", override); err != nil {
+			t.Fatalf("Set zai.base_url returned error: %v", err)
+		}
+		if got := providerBaseURL(t, target.Conv.Provider); got != override {
+			t.Fatalf("provider baseURL = %q, want %q", got, override)
+		}
+	})
+
+	t.Run("default clears and rebuilds active zai", func(t *testing.T) {
+		target := newZAITarget()
+		if err := Set(target, "zai.base_url", override); err != nil {
+			t.Fatalf("Set zai.base_url returned error: %v", err)
+		}
+		if err := Set(target, "provider", "zai"); err != nil {
+			t.Fatalf("Set provider returned error: %v", err)
+		}
+		if err := Set(target, "zai.base_url", "default"); err != nil {
+			t.Fatalf("Set zai.base_url default returned error: %v", err)
+		}
+		if target.ZaiBaseURL != "" {
+			t.Fatalf("ZaiBaseURL = %q, want cleared", target.ZaiBaseURL)
+		}
+		if got := providerBaseURL(t, target.Conv.Provider); got != "" {
+			t.Fatalf("provider baseURL = %q, want default", got)
+		}
+	})
+
+	t.Run("non-zai active provider stores without rebuild", func(t *testing.T) {
+		target := newZAITarget()
+		if err := Set(target, "provider", "other"); err != nil {
+			t.Fatalf("Set provider returned error: %v", err)
+		}
+		if err := Set(target, "zai.base_url", override); err != nil {
+			t.Fatalf("Set zai.base_url returned error: %v", err)
+		}
+		if target.ZaiBaseURL != override {
+			t.Fatalf("ZaiBaseURL = %q, want %q", target.ZaiBaseURL, override)
+		}
+		if target.Conv.Provider.Name() != "other" {
+			t.Fatalf("provider = %q, want other", target.Conv.Provider.Name())
+		}
+		if err := Set(target, "provider", "zai"); err != nil {
+			t.Fatalf("Set provider zai returned error: %v", err)
+		}
+		if got := providerBaseURL(t, target.Conv.Provider); got != override {
+			t.Fatalf("zai provider baseURL = %q, want %q", got, override)
+		}
+	})
 }
 
 func TestParsePairAndDirectSetReachIdenticalState(t *testing.T) {
@@ -384,8 +474,8 @@ func newTarget() *Target {
 					"model-a",
 					"model-b",
 				},
-				New: func(string) agentkit.Provider {
-					return fakeProvider{name: "test"}
+				New: func(_ string, opts catalog.Options) agentkit.Provider {
+					return fakeProvider{name: "test", baseURL: opts.BaseURL}
 				},
 			},
 		},
@@ -399,11 +489,57 @@ func newTarget() *Target {
 }
 
 type fakeProvider struct {
-	name string
+	name    string
+	baseURL string
 }
 
 func (p fakeProvider) RoundTrip(context.Context, *agentkit.Request) *agentkit.RoundTrip {
 	return nil
+}
+
+func newZAITarget() *Target {
+	return &Target{
+		Conv: &agentkit.Conversation{},
+		Catalog: []catalog.Provider{
+			{
+				Name:   "zai",
+				EnvKey: "ZAI_API_KEY",
+				Models: []string{
+					"zai-model",
+				},
+				New: func(_ string, opts catalog.Options) agentkit.Provider {
+					return fakeProvider{name: "zai", baseURL: opts.BaseURL}
+				},
+			},
+			{
+				Name:   "other",
+				EnvKey: "OTHER_API_KEY",
+				Models: []string{
+					"other-model",
+				},
+				New: func(_ string, opts catalog.Options) agentkit.Provider {
+					return fakeProvider{name: "other", baseURL: opts.BaseURL}
+				},
+			},
+		},
+		Getenv: func(key string) string {
+			switch key {
+			case "ZAI_API_KEY", "OTHER_API_KEY":
+				return "test-key"
+			default:
+				return ""
+			}
+		},
+	}
+}
+
+func providerBaseURL(t *testing.T, provider agentkit.Provider) string {
+	t.Helper()
+	fake, ok := provider.(fakeProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want fakeProvider", provider)
+	}
+	return fake.baseURL
 }
 
 func (p fakeProvider) Name() string {

@@ -11,7 +11,11 @@ import (
 	"github.com/ikigenba/agentkit/zai"
 )
 
-type ProviderFunc func(apiKey string) agentkit.Provider
+type ProviderFunc func(apiKey string, opts Options) agentkit.Provider
+
+type Options struct {
+	BaseURL string
+}
 
 type Provider struct {
 	Name   string
@@ -36,7 +40,7 @@ func Default() []Provider {
 				anthropic.ModelSonnet46,
 				anthropic.ModelHaiku45,
 			},
-			New: func(apiKey string) agentkit.Provider {
+			New: func(apiKey string, _ Options) agentkit.Provider {
 				return anthropic.New(apiKey)
 			},
 		},
@@ -50,7 +54,7 @@ func Default() []Provider {
 				google.ModelLite31,
 				google.ModelPro31Preview,
 			},
-			New: func(apiKey string) agentkit.Provider {
+			New: func(apiKey string, _ Options) agentkit.Provider {
 				return google.New(apiKey)
 			},
 		},
@@ -64,7 +68,7 @@ func Default() []Provider {
 				openai.ModelGPT54Mini,
 				openai.ModelGPT54Nano,
 			},
-			New: func(apiKey string) agentkit.Provider {
+			New: func(apiKey string, _ Options) agentkit.Provider {
 				return openai.New(apiKey)
 			},
 		},
@@ -77,7 +81,10 @@ func Default() []Provider {
 				zai.ModelGLM47,
 				zai.ModelGLM46,
 			},
-			New: func(apiKey string) agentkit.Provider {
+			New: func(apiKey string, opts Options) agentkit.Provider {
+				if opts.BaseURL != "" {
+					return zai.New(apiKey, zai.WithBaseURL(opts.BaseURL))
+				}
 				return zai.New(apiKey)
 			},
 		},
@@ -102,10 +109,10 @@ func (p Provider) HasModel(model string) bool {
 	return false
 }
 
-func (p Provider) Build(getenv func(string) string) (agentkit.Provider, error) {
+func (p Provider) Build(getenv func(string) string, opts Options) (agentkit.Provider, error) {
 	apiKey := getenv(p.EnvKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("%w: %s", ErrMissingKey, p.EnvKey)
 	}
-	return p.New(apiKey), nil
+	return p.New(apiKey, opts), nil
 }
