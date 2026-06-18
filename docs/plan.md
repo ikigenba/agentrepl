@@ -12,7 +12,7 @@ Not started. The workspace holds product, design, and this plan; no code, no `go
 
 ## Phases
 
-### Phase 1 — Module bootstrap & package skeleton · ⬜ not started
+### Phase 1 — Module bootstrap & package skeleton · ✅ done
 
 *Realizes design Decision 1 (package layout & seams). Depends on nothing.*
 
