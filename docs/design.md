@@ -76,15 +76,22 @@ Idiomatic-Go consequences baked into this skeleton:
 ```go
 package catalog
 
-// ProviderFunc constructs an agentkit.Provider from an API key.
-type ProviderFunc func(apiKey string) agentkit.Provider
+// ProviderFunc constructs an agentkit.Provider from an API key plus optional
+// per-construction overrides.
+type ProviderFunc func(apiKey string, opts Options) agentkit.Provider
+
+// Options carries per-construction overrides threaded from config (Decision 3).
+// The zero value leaves every provider at its baked-in defaults.
+type Options struct {
+    BaseURL string // override the provider's API root; "" → provider default
+}
 
 // Provider is one curated agentkit provider agentrepl can drive.
 type Provider struct {
     Name   string       // "anthropic" | "google" | "openai" | "zai"
     EnvKey string       // "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" | "OPENAI_API_KEY" | "ZAI_API_KEY"
     Models []string     // curated model ids, referencing agentkit's exported constants
-    New    ProviderFunc // e.g. func(k string) agentkit.Provider { return anthropic.New(k) }
+    New    ProviderFunc // e.g. func(k string, o Options) agentkit.Provider { return anthropic.New(k) }
 }
 
 // Default returns the built-in catalog of the four providers, in a stable order.
@@ -96,9 +103,9 @@ func Lookup(cat []Provider, name string) (Provider, bool)
 // HasModel reports whether model is in p's curated set.
 func (p Provider) HasModel(model string) bool
 
-// Build resolves p.EnvKey via getenv and constructs the provider, or returns
-// ErrMissingKey (wrapped, naming the env var) when the key is empty.
-func (p Provider) Build(getenv func(string) string) (agentkit.Provider, error)
+// Build resolves p.EnvKey via getenv and constructs the provider with opts, or
+// returns ErrMissingKey (wrapped, naming the env var) when the key is empty.
+func (p Provider) Build(getenv func(string) string, opts Options) (agentkit.Provider, error)
 
 var (
     ErrUnknownProvider = errors.New("unknown provider")
@@ -110,15 +117,18 @@ var (
 - `Default()`'s `Models` lists reference agentkit's exported model constants (`anthropic.ModelOpus48`, `google.ModelFlash25`, …), so the curated set is **enumerable** — for `/help`, model listings, and clear "choose from: …" errors — rather than hidden behind agentkit's unexported pricing registries.
 - The model is **pre-validated** against the mirrored `Models` list, giving an immediate, clear error before any turn. The list is kept honest by a mechanical **anti-drift test**: every curated model must be accepted by its constructed provider's `Pricing` — drift fails the suite rather than passing silently.
 - **Z.ai is an ordinary catalog entry** — present and constructible when `ZAI_API_KEY` is set. Its known-broken-ness is a turn-time failure surfaced cleanly by the error-handling decision, not a catalog special case.
+- **Provider-construction overrides ride on `Options`, not new catalog entries.** `Build` threads an `Options` into `New`; today only the `zai` entry consumes it, mapping a non-empty `Options.BaseURL` to agentkit's `zai.WithBaseURL(...)` option and otherwise leaving Z.ai's baked-in default root (`https://api.z.ai/api/paas/v4`). The other three entries ignore `Options`. This is the seam the `zai.base_url` config key (Decision 3) drives — e.g. to point Z.ai at its coding-plan endpoint `https://api.z.ai/api/coding/paas/v4` — keeping the "new knob = new key, no bespoke flag" promise and avoiding a per-endpoint catalog entry.
 - `ErrMissingKey` is ordinary non-fatal data; the REPL renders it as a clear message and stays alive (resilience lives in the dispatch/error decisions). `EnvKey` is read via the injected `Getenv` — agentrepl never reads a credential file.
 
 **Rejected.**
 - **A `Catalog` interface** — speculative abstraction; only the constructor needs swapping, which `ProviderFunc` covers.
 - **Model pass-through** (accept any string, let `conv.Send` reject unknowns) — the error is cryptic, arrives only at send time, and models can't be enumerated; weaker against the product's "reported clearly" promise.
 - **Validate by constructing the provider and calling `Pricing`** — needs the API key present just to check a name, and can't enumerate the curated set.
+- **A separate catalog entry per Z.ai endpoint** — multiplies the curated set for what is one construction option; an `Options.BaseURL` override is the smaller seam.
 
 **Verification.**
 - R-OVEC-4AWS — `Default()` returns exactly the four providers `anthropic`, `google`, `openai`, `zai`, each carrying its contractual env key (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`).
+- R-S94E-8K1O — `Build` threads its `Options` into the provider constructor: a non-empty `Options.BaseURL` reaches the `zai` entry as `zai.WithBaseURL(...)` so the constructed Z.ai provider targets the override root, while an empty `Options.BaseURL` leaves the baked-in default and the other three entries ignore `Options`.
 - R-OWM8-I2NH — anti-drift: for every provider in `Default()`, every id in its `Models` list is accepted by the constructed provider's `Pricing(model)` (returns ok).
 - R-OXU4-VUE6 — each provider's `Models` list is non-empty.
 - R-OZ21-9M4V — `Build` returns an error wrapping `ErrMissingKey` and naming the env var when `getenv` yields empty for the provider's key, and constructs nothing.
@@ -134,9 +144,10 @@ package config
 
 // Target is what config reads and mutates.
 type Target struct {
-    Conv    *agentkit.Conversation
-    Catalog []catalog.Provider
-    Getenv  func(string) string
+    Conv       *agentkit.Conversation
+    Catalog    []catalog.Provider
+    Getenv     func(string) string
+    ZaiBaseURL string // pending zai base-URL override; applied when zai is (re)built
 }
 
 // Set applies one key=value to t, or returns a clear, wrapped error.
@@ -177,11 +188,13 @@ Internally a `map[string]field`, where `field` carries `set(t, raw) error` and `
 | `retry.max_elapsed` | `Retry.MaxElapsed` | duration |
 | `retry.ignore_retry_after` | `Retry.IgnoreRetryAfter` | bool |
 | `tool_loop_limit` | `Conv.MaxToolIterations` | int |
+| `zai.base_url` | `Target.ZaiBaseURL` → `catalog.Options.BaseURL` for the `zai` build | URL string |
 
 - **Unset sentinel.** Setting the literal value `default` resets *any* key to its zero/unset state (nil pointer, `EffortDefault`, zero int/duration); `Dump`/`Get` render an unset key as `default`. One uniform rule, no per-key syntax.
 - **provider / model coupling** (loose, to avoid ordering deadlocks):
   - `provider=<name>` → catalog `Lookup` + `Build(getenv)`; sets `Conv.Provider`; surfaces `ErrUnknownProvider` / `ErrMissingKey` through `Set`; does not touch model.
   - `model=<id>` → if a provider is set, pre-validate with `HasModel` (clear `ErrUnknownModel` with "choose from: …"); else accept the string. The (provider, model) pair is ultimately validated by agentkit at `Send` and surfaced cleanly — a transient post-switch mismatch is a clear send-time error, never a crash.
+- **`zai.base_url` is a provider-construction override, applied through the catalog `Options` seam (Decision 2), and order-independent with `provider`.** A base URL is baked into the provider handle at construction, not a `Conversation` field, so the value is stored on `Target.ZaiBaseURL` and the `zai` provider is (re)built to apply it. `provider=zai` builds with `Options{BaseURL: t.ZaiBaseURL}`; setting `zai.base_url` while `zai` is already the active provider rebuilds it with the new root; setting it before any provider is selected just stores it for the eventual `zai` build — either order reaches the same state. `zai.base_url=default` clears the override (back to Z.ai's baked-in root) and rebuilds if zai is active. For a non-zai active provider the key is stored but not applied (a no-op against the live conversation until zai is selected).
 - Both control surfaces share this one entrypoint: the `-c` flag does `ParsePair` then `Set`; `/set <key> <value>` calls `Set` directly; `/dump` calls `Dump`. Adding a key automatically reaches both surfaces.
 
 **Rejected.**
@@ -197,6 +210,7 @@ Internally a `map[string]field`, where `field` carries `set(t, raw) error` and `
 - R-M3FT-HAYK — `provider=` constructs via the catalog and surfaces `ErrUnknownProvider`/`ErrMissingKey` through `Set`; `model=` pre-validates against the current provider with `ErrUnknownModel`.
 - R-M4NP-V2P9 — `Dump` returns all keys sorted as `key=value` lines reflecting current state.
 - R-M5VM-8UFY — flag/runtime parity: `ParsePair`+`Set` and a direct `Set` reach identical state for the same key and value.
+- R-SCS3-DV9R — setting `zai.base_url` stores the override on `Target` and, when `zai` is (or becomes) the active provider, the constructed Z.ai provider is built with that base URL via the catalog `Options` seam — reached identically whether `zai.base_url` is set before or after `provider=zai`; `zai.base_url=default` clears it and rebuilds against the baked-in root.
 
 ## Decision 4 — CLI flags
 
