@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"iter"
 	"os"
 	"path/filepath"
@@ -323,6 +324,93 @@ func TestExitQuitAndEOFReturnCleanly(t *testing.T) {
 	}
 }
 
+func TestIdleInterruptExitsThroughGracefulCleanup(t *testing.T) {
+	// R-LXGK-M9SO
+	// R-M149-RL0R
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	var out, errOut bytes.Buffer
+	logDir := t.TempDir()
+	done := make(chan int, 1)
+
+	go func() {
+		done <- Run(ctx, Deps{
+			IO: IO{
+				In:  reader,
+				Out: &out,
+				Err: &errOut,
+			},
+			Getenv: func(string) string { return "" },
+			Now: func() time.Time {
+				return time.Date(2026, 6, 18, 12, 0, 0, 123456000, time.UTC)
+			},
+			LogDir: logDir,
+		}, Options{})
+	}()
+
+	cancel()
+	code := awaitRun(t, done)
+	if code != 130 {
+		t.Fatalf("Run exit code = %d, want 130", code)
+	}
+	if errOut.String() != "" {
+		t.Fatalf("stderr = %q, want empty for interrupt", errOut.String())
+	}
+	if !strings.Contains(out.String(), "notice › interrupted") {
+		t.Fatalf("stdout = %q, want interrupt notice", out.String())
+	}
+	if !strings.HasSuffix(out.String(), "summary\n· tokens  in=0 cache(r=0 w=0) out=0 reasoning=0 total=0\n· cost     $0.000000 session\n") {
+		t.Fatalf("stdout = %q, want summary as final output", out.String())
+	}
+	log := readOnlyLog(t, logDir)
+	assertLogTypes(t, log, []string{"summary"})
+}
+
+func TestStreamingInterruptLeavesValidLogAndDoesNotAccumulateUsage(t *testing.T) {
+	// R-LYOH-01JD
+	// R-OPZQ-Y90U
+	// R-OUVC-HBZM
+	provider := newInterruptProvider()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan runResult, 1)
+
+	go func() {
+		done <- runScriptWithProviderContext(t, ctx, "before\ninterrupt\n", Options{}, provider)
+	}()
+
+	<-provider.interruptStarted
+	cancel()
+	result := awaitRunResult(t, done)
+	if result.code != 130 {
+		t.Fatalf("Run exit code = %d, stderr %q", result.code, result.stderr)
+	}
+	if strings.Contains(result.stdout, "error ›") {
+		t.Fatalf("stdout = %q, want interrupt notice instead of rendered error", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "· cost     $0.002000 session") {
+		t.Fatalf("stdout = %q, want final summary to keep pre-interrupt cumulative cost only", result.stdout)
+	}
+	if !strings.HasSuffix(result.stdout, "summary\n· tokens  in=100 cache(r=0 w=0) out=50 reasoning=0 total=150\n· cost     $0.002000 session\n") {
+		t.Fatalf("stdout = %q, want summary as final output", result.stdout)
+	}
+	records := decodeLogRecords(t, result.log)
+	if len(records) < 3 {
+		t.Fatalf("log records = %#v, want turn_end then summary", records)
+	}
+	if records[len(records)-2]["type"] != "turn_end" || records[len(records)-1]["type"] != "summary" {
+		t.Fatalf("last log records = %#v, want turn_end then summary\nlog:\n%s", records[len(records)-2:], result.log)
+	}
+	for i, record := range records {
+		if record["type"] == nil {
+			t.Fatalf("log record %d missing type after JSON decode: %#v", i, record)
+		}
+	}
+}
+
 func TestCompletedRunWritesConversationRecordsAndSummaryToLog(t *testing.T) {
 	// R-8IUX-DBG8
 	provider := newScriptedProvider(toolUseRound(), successRound("done", usageTwo()))
@@ -362,6 +450,7 @@ func TestSessionLogIsIndependentOfRenderMode(t *testing.T) {
 }
 
 func TestRuntimeSelectionErrorWritesStdoutAndStartupFatalWritesStderr(t *testing.T) {
+	// R-HB5I-QYZH
 	out, errOut, code := runScript(t, "/set provider anthropic\n/exit\n", Options{})
 	if code != 0 {
 		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
@@ -382,6 +471,37 @@ func TestRuntimeSelectionErrorWritesStdoutAndStartupFatalWritesStderr(t *testing
 	}
 	if !strings.Contains(errOut, "unknown config key") {
 		t.Fatalf("stderr = %q, want startup fatal", errOut)
+	}
+}
+
+func TestExpectedFailuresRenderAndDoNotEndLoop(t *testing.T) {
+	// R-H9XM-D78S
+	// R-HCDF-4QQ6
+	provider := newScriptedProvider(toolUseRound(), errorRound("provider failed"), successRound("after failures", usageOne()))
+	out, errOut, _, code := runScriptWithProvider(t, strings.Join([]string{
+		"/does-not-exist",
+		"/set gen.max_tokens nope",
+		"use missing file tool",
+		"provider failure",
+		"still alive",
+		"/exit",
+	}, "\n")+"\n", Options{}, provider)
+	if code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
+	}
+	for _, want := range []string{
+		"unknown command",
+		"invalid value",
+		"tool error › read",
+		"provider failed",
+		"assistant › after failures",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout = %q, want expected failure or recovery marker %q", out, want)
+		}
+	}
+	if errOut != "" {
+		t.Fatalf("stderr = %q, want empty for in-loop expected failures", errOut)
 	}
 }
 
@@ -511,6 +631,60 @@ func runScriptWithProvider(t *testing.T, script string, opts Options, provider *
 	return out.String(), errOut.String(), string(content), code
 }
 
+type runResult struct {
+	stdout string
+	stderr string
+	log    string
+	code   int
+}
+
+func runScriptWithProviderContext(t *testing.T, ctx context.Context, script string, opts Options, provider agentkit.Provider) runResult {
+	t.Helper()
+	originalCatalog := defaultCatalog
+	defaultCatalog = func() []catalog.Provider {
+		return []catalog.Provider{{
+			Name:   "test",
+			EnvKey: "TEST_API_KEY",
+			Models: []string{"test-model"},
+			New: func(string) agentkit.Provider {
+				return provider
+			},
+		}}
+	}
+	t.Cleanup(func() {
+		defaultCatalog = originalCatalog
+	})
+
+	var out, errOut bytes.Buffer
+	logDir := t.TempDir()
+	code := Run(ctx, Deps{
+		IO: IO{
+			In:  strings.NewReader(script),
+			Out: &out,
+			Err: &errOut,
+		},
+		Getenv: func(key string) string {
+			if key == "TEST_API_KEY" {
+				return "secret"
+			}
+			return ""
+		},
+		Now: func() time.Time {
+			return time.Date(2026, 6, 18, 12, 0, 0, 123456000, time.UTC)
+		},
+		LogDir: logDir,
+	}, Options{
+		Config: append([]string{"provider=test", "model=test-model"}, opts.Config...),
+		Raw:    opts.Raw,
+	})
+	return runResult{
+		stdout: out.String(),
+		stderr: errOut.String(),
+		log:    readOnlyLog(t, logDir),
+		code:   code,
+	}
+}
+
 type scriptedProvider struct {
 	rounds   []*agentkit.RoundTrip
 	requests []agentkit.Request
@@ -535,6 +709,43 @@ func (p *scriptedProvider) Name() string {
 }
 
 func (p *scriptedProvider) Pricing(model string) (agentkit.Pricing, bool) {
+	if model != "test-model" {
+		return agentkit.Pricing{}, false
+	}
+	return agentkit.Pricing{Tiers: []agentkit.RateTier{{
+		InputUncached: 10_000,
+		Output:        20_000,
+	}}}, true
+}
+
+type interruptProvider struct {
+	interruptStarted chan struct{}
+	requests         []agentkit.Request
+}
+
+func newInterruptProvider() *interruptProvider {
+	return &interruptProvider{interruptStarted: make(chan struct{})}
+}
+
+func (p *interruptProvider) RoundTrip(ctx context.Context, req *agentkit.Request) *agentkit.RoundTrip {
+	p.requests = append(p.requests, *req)
+	if len(p.requests) == 1 {
+		return successRound("before interrupt", usageOne())
+	}
+	close(p.interruptStarted)
+	<-ctx.Done()
+	return agentkit.NewRoundTrip(nil, agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{
+		InputUncached: 999,
+		Output:        999,
+		Total:         1998,
+	}, nil, ctx.Err())
+}
+
+func (p *interruptProvider) Name() string {
+	return "test"
+}
+
+func (p *interruptProvider) Pricing(model string) (agentkit.Pricing, bool) {
 	if model != "test-model" {
 		return agentkit.Pricing{}, false
 	}
@@ -608,6 +819,44 @@ func assertLogTypes(t *testing.T, log string, want []string) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("log types = %#v, want %#v\nlog:\n%s", got, want, log)
 	}
+}
+
+func awaitRun(t *testing.T, done <-chan int) int {
+	t.Helper()
+	select {
+	case code := <-done:
+		return code
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return")
+		return -1
+	}
+}
+
+func awaitRunResult(t *testing.T, done <-chan runResult) runResult {
+	t.Helper()
+	select {
+	case result := <-done:
+		return result
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return")
+		return runResult{}
+	}
+}
+
+func readOnlyLog(t *testing.T, logDir string) string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(logDir, "*.jsonl"))
+	if err != nil {
+		t.Fatalf("checking log dir: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("log files = %v, want exactly one", matches)
+	}
+	content, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	return string(content)
 }
 
 func decodeLogRecords(t *testing.T, log string) []map[string]any {

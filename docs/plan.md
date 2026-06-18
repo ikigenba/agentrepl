@@ -87,7 +87,7 @@ Fill in the turn-handler seam left by Phase 7a and complete the graceful-exit se
 - Decision 8 (content) — R-8IUX-DBG8, R-8K2T-R36X.
 - Decision 11 (turn) — R-H7HT-LNRE.
 
-### Phase 8 — Composition root, interrupt & log integrity · ⬜ not started
+### Phase 8 — Composition root, interrupt & log integrity · ✅ done
 
 *Realizes design Decision 6 (REPL lifecycle: interrupt & log integrity, the signal half), Decision 11 (resilience, the signal/startup-fatal half), Decision 7 (success-only accounting under interrupt), and completes Decision 1's composition root. Depends on Phase 7b.*
 

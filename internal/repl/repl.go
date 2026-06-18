@@ -70,27 +70,63 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		state.rend.Summary(conv.TotalUsage(), conv.TotalCost())
 	}()
 
-	scanner := bufio.NewScanner(d.IO.In)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "/") {
-			runCommand(state, line)
-		} else if state.conv.Provider == nil || state.conv.Model == "" {
-			state.rend.Notice("set a provider and model first - e.g. `/set provider anthropic` then `/set model ...`")
-		} else {
-			handleTurn(ctx, state, line)
-		}
-		if state.quit {
-			return state.exitCode
+	lines := scanLines(ctx, d.IO.In)
+	for {
+		select {
+		case <-ctx.Done():
+			state.rend.Notice("interrupted")
+			return 130
+		case result, ok := <-lines:
+			if !ok {
+				return 0
+			}
+			if result.err != nil {
+				state.rend.Error(result.err)
+				return 0
+			}
+			line := result.line
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			if strings.HasPrefix(line, "/") {
+				runCommand(state, line)
+			} else if state.conv.Provider == nil || state.conv.Model == "" {
+				state.rend.Notice("set a provider and model first - e.g. `/set provider anthropic` then `/set model ...`")
+			} else {
+				handleTurn(ctx, state, line)
+			}
+			if state.quit {
+				return state.exitCode
+			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		state.rend.Error(err)
-	}
-	return 0
+}
+
+type scanResult struct {
+	line string
+	err  error
+}
+
+func scanLines(ctx context.Context, in io.Reader) <-chan scanResult {
+	results := make(chan scanResult, 1)
+	go func() {
+		defer close(results)
+		scanner := bufio.NewScanner(in)
+		for scanner.Scan() {
+			select {
+			case results <- scanResult{line: scanner.Text()}:
+			case <-ctx.Done():
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			select {
+			case results <- scanResult{err: err}:
+			case <-ctx.Done():
+			}
+		}
+	}()
+	return results
 }
 
 func normalizeDeps(d Deps) Deps {
