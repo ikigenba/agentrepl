@@ -18,14 +18,15 @@ type command struct {
 }
 
 type state struct {
-	conv   *agentkit.Conversation
-	target *config.Target
-	cat    []catalog.Provider
-	io     IO
-	rend   render.Renderer
-	color  bool
-	getenv func(string) string
-	quit   bool
+	conv     *agentkit.Conversation
+	target   *config.Target
+	cat      []catalog.Provider
+	io       IO
+	rend     render.Renderer
+	color    bool
+	getenv   func(string) string
+	quit     bool
+	exitCode int
 }
 
 var commands map[string]command
@@ -63,6 +64,14 @@ func init() {
 				for _, line := range config.Dump(s.target) {
 					s.rend.Notice(line)
 				}
+				return nil
+			},
+		},
+		"usage": {
+			summary: "show cumulative usage",
+			usage:   "/usage",
+			run: func(s *state, _ string) error {
+				s.rend.Summary(s.conv.TotalUsage(), s.conv.TotalCost())
 				return nil
 			},
 		},

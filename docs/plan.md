@@ -73,7 +73,7 @@ Build the orchestrator's launch surface and read-dispatch loop in `internal/repl
 - Decision 9 (non-turn) — R-BI0J-TIHX, R-BKGC-L1ZB, R-BLO8-YTQ0, R-BMW5-CLGP, R-BO41-QD7E, R-BPBY-44Y3, R-BQJU-HWOS.
 - Decision 11 (command/config) — R-H8PP-ZFI3.
 
-### Phase 7b — REPL turn driver, usage triggers & graceful exit · ⬜ not started
+### Phase 7b — REPL turn driver, usage triggers & graceful exit · ✅ done
 
 *Realizes design Decision 5 (turn driver, the driver half), Decision 7 (usage sourcing & triggers, the in-loop half), Decision 6 (graceful-exit cleanup, the non-signal half), Decision 9 (the turn-classification id), Decision 8 (session-log content), and Decision 11 (turn-error resilience, the in-loop half). Depends on Phase 7a.*
 

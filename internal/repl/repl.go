@@ -29,9 +29,8 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		fmt.Fprintf(d.IO.Err, "startup: open session log: %v\n", err)
 		return 1
 	}
-	defer log.Close()
 
-	cat := catalog.Default()
+	cat := defaultCatalog()
 	conv := &agentkit.Conversation{
 		Log:   log,
 		Tools: tools.All(),
@@ -45,10 +44,12 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		key, value, err := config.ParsePair(raw)
 		if err != nil {
 			fmt.Fprintf(d.IO.Err, "startup: config %q: %v\n", raw, err)
+			_ = log.Close()
 			return 1
 		}
 		if err := config.Set(target, key, value); err != nil {
 			fmt.Fprintf(d.IO.Err, "startup: config %q: %v\n", raw, err)
+			_ = log.Close()
 			return 1
 		}
 	}
@@ -63,6 +64,11 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		color:  color,
 		getenv: d.Getenv,
 	}
+	defer log.Close()
+	defer conv.Close()
+	defer func() {
+		state.rend.Summary(conv.TotalUsage(), conv.TotalCost())
+	}()
 
 	scanner := bufio.NewScanner(d.IO.In)
 	for scanner.Scan() {
@@ -78,7 +84,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 			handleTurn(ctx, state, line)
 		}
 		if state.quit {
-			return 0
+			return state.exitCode
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -110,6 +116,23 @@ func newRenderer(out io.Writer, color bool, raw bool) render.Renderer {
 	return render.NewDecorated(out, color)
 }
 
-func handleTurn(_ context.Context, s *state, _ string) {
-	s.rend.Notice("turn execution is not available in this build")
+func handleTurn(ctx context.Context, s *state, text string) {
+	s.rend.Prompt(text)
+	stream := s.conv.Send(ctx, text)
+	for ev := range stream.Events() {
+		s.rend.Event(ev)
+	}
+	if ctx.Err() != nil {
+		s.rend.Notice("interrupted")
+		s.quit = true
+		s.exitCode = 130
+		return
+	}
+	if err := stream.Err(); err != nil {
+		s.rend.Error(err)
+		return
+	}
+	s.rend.Usage(stream.Usage(), stream.Cost(), s.conv.TotalCost())
 }
+
+var defaultCatalog = catalog.Default

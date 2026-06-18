@@ -3,8 +3,12 @@ package repl
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"iter"
+	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -166,34 +170,27 @@ func TestClearEmptiesHistoryAndLeavesSpend(t *testing.T) {
 
 func TestRenderCommandSwitchesRenderer(t *testing.T) {
 	// R-BMW5-CLGP
-	cat := catalog.Default()
-	openai, ok := catalog.Lookup(cat, "openai")
-	if !ok {
-		t.Fatal("openai provider missing from catalog")
-	}
+	provider := newScriptedProvider(successRound("raw ok", usageOne()), successRound("decorated ok", usageTwo()))
 	script := strings.Join([]string{
-		"/set provider openai",
-		"/set model " + openai.Models[0],
+		"/set provider test",
+		"/set model test-model",
 		"/render raw",
 		"hello raw",
 		"/render decorated",
 		"hello decorated",
 		"/exit",
 	}, "\n") + "\n"
-	out, errOut, code := runScriptWithEnv(t, script, Options{}, func(key string) string {
-		if key == "OPENAI_API_KEY" {
-			return "secret"
-		}
-		return ""
-	})
+	out, errOut, _, code := runScriptWithProvider(t, script, Options{}, provider)
 	if code != 0 {
 		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
 	}
-	if !strings.Contains(out, `{"type":"notice","text":"turn execution is not available in this build"}`) {
-		t.Fatalf("stdout = %q, want raw JSON turn-stub notice after /render raw", out)
+	if !strings.Contains(out, `{"type":"prompt","text":"hello raw"}`) ||
+		!strings.Contains(out, `{"type":"usage"`) {
+		t.Fatalf("stdout = %q, want raw JSON turn after /render raw", out)
 	}
-	if !strings.Contains(out, "notice › turn execution is not available in this build") {
-		t.Fatalf("stdout = %q, want decorated turn-stub notice after /render decorated", out)
+	if !strings.Contains(out, "you › hello decorated") ||
+		!strings.Contains(out, "assistant › decorated ok") {
+		t.Fatalf("stdout = %q, want decorated turn after /render decorated", out)
 	}
 }
 
@@ -245,7 +242,66 @@ func TestTurnPrecheckHintsBeforeProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestTurnMessageDrivesConversationAndEmptyLineIsIgnored(t *testing.T) {
+	// R-BJ8G-7A8M
+	provider := newScriptedProvider(successRound("hi", usageOne()))
+	out, errOut, log, code := runScriptWithProvider(t, "\nhello\n/exit\n", Options{}, provider)
+	if code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("provider request count = %d, want 1", len(provider.requests))
+	}
+	if !strings.Contains(out, "you › hello") || !strings.Contains(out, "assistant › hi") {
+		t.Fatalf("stdout = %q, want completed turn for non-command input", out)
+	}
+	assertLogTypes(t, log, []string{"turn_start", "message", "usage", "turn_end", "summary"})
+}
+
+func TestFailedTurnRendersErrorSkipsUsageAndContinues(t *testing.T) {
+	// R-LSKZ-36TW
+	// R-OPZQ-Y90U
+	// R-H7HT-LNRE
+	provider := newScriptedProvider(errorRound("provider failed"), successRound("after error", usageOne()))
+	out, errOut, log, code := runScriptWithProvider(t, "fail once\nrecover\n/exit\n", Options{}, provider)
+	if code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
+	}
+	if !strings.Contains(out, "error › provider failed") {
+		t.Fatalf("stdout = %q, want rendered turn error", out)
+	}
+	if !strings.Contains(out, "you › recover") || !strings.Contains(out, "assistant › after error") {
+		t.Fatalf("stdout = %q, want loop to accept next input", out)
+	}
+	if strings.Count(out, "· cost     $0.002000 turn") != 1 {
+		t.Fatalf("stdout = %q, want only successful turn usage", out)
+	}
+	if !strings.Contains(out, "· cost     $0.002000 session") {
+		t.Fatalf("stdout = %q, want errored turn excluded from session cumulative", out)
+	}
+	assertLogTypes(t, log, []string{"turn_start", "error", "turn_end", "turn_start", "message", "usage", "turn_end", "summary"})
+}
+
+func TestUsageCommandRendersAgentkitCumulativeSummary(t *testing.T) {
+	// R-OSFJ-PSI8
+	provider := newScriptedProvider(successRound("first", usageOne()), successRound("second", usageTwo()))
+	out, errOut, _, code := runScriptWithProvider(t, "one\n/usage\ntwo\n/exit\n", Options{}, provider)
+	if code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
+	}
+	firstSummary := "summary\n· tokens  in=100 cache(r=0 w=0) out=50 reasoning=0 total=150\n· cost     $0.002000 session"
+	if !strings.Contains(out, firstSummary) {
+		t.Fatalf("stdout = %q, want /usage summary sourced from first completed turn", out)
+	}
+	finalSummary := "summary\n· tokens  in=300 cache(r=0 w=0) out=150 reasoning=0 total=450\n· cost     $0.006000 session"
+	if !strings.Contains(out, finalSummary) {
+		t.Fatalf("stdout = %q, want exit summary sourced from both completed turns", out)
+	}
+}
+
 func TestExitQuitAndEOFReturnCleanly(t *testing.T) {
+	// R-LW8O-8I1Z
+	// R-OUVC-HBZM
 	for _, tc := range []struct {
 		name   string
 		script string
@@ -255,11 +311,53 @@ func TestExitQuitAndEOFReturnCleanly(t *testing.T) {
 		{name: "eof", script: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			out, errOut, code := runScript(t, tc.script, Options{})
+			out, errOut, log, code := runScriptWithProvider(t, tc.script, Options{}, newScriptedProvider())
 			if code != 0 {
 				t.Fatalf("Run exit code = %d, stderr %q, stdout %q", code, errOut, out)
 			}
+			if !strings.HasSuffix(out, "summary\n· tokens  in=0 cache(r=0 w=0) out=0 reasoning=0 total=0\n· cost     $0.000000 session\n") {
+				t.Fatalf("stdout = %q, want summary as final output", out)
+			}
+			assertLogTypes(t, log, []string{"summary"})
 		})
+	}
+}
+
+func TestCompletedRunWritesConversationRecordsAndSummaryToLog(t *testing.T) {
+	// R-8IUX-DBG8
+	provider := newScriptedProvider(toolUseRound(), successRound("done", usageTwo()))
+	_, errOut, log, code := runScriptWithProvider(t, "use tool\n/exit\n", Options{}, provider)
+	if code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
+	}
+	assertLogTypes(t, log, []string{"turn_start", "message", "tool_use", "tool_result", "message", "usage", "turn_end", "summary"})
+	records := decodeLogRecords(t, log)
+	if records[0]["provider"] != "test" || records[0]["model"] != "test-model" {
+		t.Fatalf("turn_start = %#v, want provider/model", records[0])
+	}
+	if records[len(records)-2]["status"] != "ok" {
+		t.Fatalf("turn_end = %#v, want ok status", records[len(records)-2])
+	}
+}
+
+func TestSessionLogIsIndependentOfRenderMode(t *testing.T) {
+	// R-8K2T-R36X
+	decoratedProvider := newScriptedProvider(successRound("same", usageOne()))
+	_, errOut, decoratedLog, code := runScriptWithProvider(t, "hello\n/exit\n", Options{}, decoratedProvider)
+	if code != 0 {
+		t.Fatalf("decorated Run exit code = %d, stderr %q", code, errOut)
+	}
+
+	rawProvider := newScriptedProvider(successRound("same", usageOne()))
+	_, errOut, rawLog, code := runScriptWithProvider(t, "hello\n/exit\n", Options{Raw: true}, rawProvider)
+	if code != 0 {
+		t.Fatalf("raw Run exit code = %d, stderr %q", code, errOut)
+	}
+
+	decorated := normalizedLogRecords(t, decoratedLog)
+	raw := normalizedLogRecords(t, rawLog)
+	if !reflect.DeepEqual(raw, decorated) {
+		t.Fatalf("raw log = %#v, want decorated log %#v", raw, decorated)
 	}
 }
 
@@ -358,4 +456,182 @@ func runScriptWithEnv(t *testing.T, script string, opts Options, getenv func(str
 		t.Fatalf("checking log dir: %v", err)
 	}
 	return out.String(), errOut.String(), code
+}
+
+func runScriptWithProvider(t *testing.T, script string, opts Options, provider *scriptedProvider) (stdout, stderr, log string, code int) {
+	t.Helper()
+	originalCatalog := defaultCatalog
+	defaultCatalog = func() []catalog.Provider {
+		return []catalog.Provider{{
+			Name:   "test",
+			EnvKey: "TEST_API_KEY",
+			Models: []string{"test-model"},
+			New: func(string) agentkit.Provider {
+				return provider
+			},
+		}}
+	}
+	t.Cleanup(func() {
+		defaultCatalog = originalCatalog
+	})
+
+	var out, errOut bytes.Buffer
+	logDir := t.TempDir()
+	code = Run(context.Background(), Deps{
+		IO: IO{
+			In:  strings.NewReader(script),
+			Out: &out,
+			Err: &errOut,
+		},
+		Getenv: func(key string) string {
+			if key == "TEST_API_KEY" {
+				return "secret"
+			}
+			return ""
+		},
+		Now: func() time.Time {
+			return time.Date(2026, 6, 18, 12, 0, 0, 123456000, time.UTC)
+		},
+		LogDir: logDir,
+	}, Options{
+		Config: append([]string{"provider=test", "model=test-model"}, opts.Config...),
+		Raw:    opts.Raw,
+	})
+	matches, err := filepath.Glob(filepath.Join(logDir, "*.jsonl"))
+	if err != nil {
+		t.Fatalf("checking log dir: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("log files = %v, want exactly one", matches)
+	}
+	content, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	return out.String(), errOut.String(), string(content), code
+}
+
+type scriptedProvider struct {
+	rounds   []*agentkit.RoundTrip
+	requests []agentkit.Request
+}
+
+func newScriptedProvider(rounds ...*agentkit.RoundTrip) *scriptedProvider {
+	return &scriptedProvider{rounds: rounds}
+}
+
+func (p *scriptedProvider) RoundTrip(_ context.Context, req *agentkit.Request) *agentkit.RoundTrip {
+	p.requests = append(p.requests, *req)
+	if len(p.rounds) == 0 {
+		return errorRound("unexpected provider call")
+	}
+	round := p.rounds[0]
+	p.rounds = p.rounds[1:]
+	return round
+}
+
+func (p *scriptedProvider) Name() string {
+	return "test"
+}
+
+func (p *scriptedProvider) Pricing(model string) (agentkit.Pricing, bool) {
+	if model != "test-model" {
+		return agentkit.Pricing{}, false
+	}
+	return agentkit.Pricing{Tiers: []agentkit.RateTier{{
+		InputUncached: 10_000,
+		Output:        20_000,
+	}}}, true
+}
+
+func successRound(text string, usage agentkit.Usage) *agentkit.RoundTrip {
+	message := agentkit.Message{
+		Role:   agentkit.RoleAssistant,
+		Blocks: []agentkit.Block{agentkit.TextBlock{Text: text}},
+	}
+	return agentkit.NewRoundTrip(eventSeq(agentkit.TextDelta{Text: text}), message, agentkit.FinishStop, usage, nil, nil)
+}
+
+func toolUseRound() *agentkit.RoundTrip {
+	message := agentkit.Message{
+		Role: agentkit.RoleAssistant,
+		Blocks: []agentkit.Block{agentkit.ToolUseBlock{
+			ID:    "toolu_1",
+			Name:  "read",
+			Input: json.RawMessage(`{"path":"missing.txt"}`),
+		}},
+	}
+	return agentkit.NewRoundTrip(nil, message, agentkit.FinishToolUse, usageOne(), nil, nil)
+}
+
+func errorRound(message string) *agentkit.RoundTrip {
+	return agentkit.NewRoundTrip(nil, agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, errors.New(message))
+}
+
+func eventSeq(events ...agentkit.Event) iter.Seq[agentkit.Event] {
+	return func(yield func(agentkit.Event) bool) {
+		for _, ev := range events {
+			if !yield(ev) {
+				return
+			}
+		}
+	}
+}
+
+func usageOne() agentkit.Usage {
+	return agentkit.Usage{
+		InputUncached: 100,
+		Output:        50,
+		Total:         150,
+	}
+}
+
+func usageTwo() agentkit.Usage {
+	return agentkit.Usage{
+		InputUncached: 200,
+		Output:        100,
+		Total:         300,
+	}
+}
+
+func assertLogTypes(t *testing.T, log string, want []string) {
+	t.Helper()
+	records := decodeLogRecords(t, log)
+	got := make([]string, 0, len(records))
+	for _, record := range records {
+		value, ok := record["type"].(string)
+		if !ok {
+			t.Fatalf("log record missing string type: %#v", record)
+		}
+		got = append(got, value)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("log types = %#v, want %#v\nlog:\n%s", got, want, log)
+	}
+}
+
+func decodeLogRecords(t *testing.T, log string) []map[string]any {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(log), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return nil
+	}
+	records := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("invalid JSONL record %q: %v", line, err)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func normalizedLogRecords(t *testing.T, log string) []map[string]any {
+	t.Helper()
+	records := decodeLogRecords(t, log)
+	for _, record := range records {
+		delete(record, "time")
+	}
+	return records
 }
