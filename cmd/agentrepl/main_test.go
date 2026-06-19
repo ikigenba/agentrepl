@@ -40,4 +40,17 @@ func TestRunWiresHomeLogDirAndExitCodes(t *testing.T) {
 	if !strings.Contains(errOut.String(), "flag provided but not defined") {
 		t.Fatalf("stderr = %q, want flag error", errOut.String())
 	}
+
+	out.Reset()
+	errOut.Reset()
+	code = run([]string{"-h"}, strings.NewReader(""), &out, &errOut, false)
+	if code != 0 {
+		t.Fatalf("help exit code = %d, stderr %q", code, errOut.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty for help", errOut.String())
+	}
+	if !strings.Contains(out.String(), "usage: agentrepl") || !strings.Contains(out.String(), "providers:") {
+		t.Fatalf("stdout = %q, want self-describing help", out.String())
+	}
 }

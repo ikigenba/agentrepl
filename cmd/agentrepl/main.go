@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -17,8 +19,15 @@ func main() {
 }
 
 func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
-	opts, err := repl.ParseArgs("agentrepl", args, errOut)
+	parseOut := errOut
+	if hasHelpFlag(args) {
+		parseOut = out
+	}
+	opts, err := repl.ParseArgs("agentrepl", args, parseOut)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 1
 	}
 
@@ -50,4 +59,13 @@ func stdoutIsTTY() bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice != 0
+}
+
+func hasHelpFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "-h" || arg == "-help" || arg == "--help" {
+			return true
+		}
+	}
+	return false
 }

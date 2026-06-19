@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
+	"fmt"
 	"io"
 	"iter"
 	"os"
@@ -57,8 +59,167 @@ func TestParseArgsRawDefaultAndUnknownFlagUsage(t *testing.T) {
 	if _, err := ParseArgs("agentrepl", []string{"-provider", "anthropic"}, &usage); err == nil {
 		t.Fatal("ParseArgs unknown flag returned nil error")
 	}
-	if got := usage.String(); !strings.Contains(got, "flag provided but not defined") || !strings.Contains(got, "Usage of agentrepl") {
+	if got := usage.String(); !strings.Contains(got, "flag provided but not defined") || !strings.Contains(got, "usage: agentrepl") {
 		t.Fatalf("unknown flag usage = %q, want flag error and usage", got)
+	}
+}
+
+func TestParseArgsHelpWritesCatalogAndReturnsErrHelpCredentialBlind(t *testing.T) {
+	// R-FT8W-Z2U4
+	constructed := false
+	originalCatalog := defaultCatalog
+	defaultCatalog = func() []catalog.Provider {
+		return []catalog.Provider{{
+			Name:   "test",
+			EnvKey: "TEST_API_KEY",
+			Models: []string{"test-model"},
+			New: func(string, catalog.Options) agentkit.Provider {
+				constructed = true
+				return nil
+			},
+			Reasoning: staticReasoning{"test-model": {
+				Term: "effort", Kind: agentkit.ReasoningEnum,
+				Levels: []string{"low", "high"}, Default: agentkit.Level("high"),
+			}},
+		}}
+	}
+	t.Cleanup(func() {
+		defaultCatalog = originalCatalog
+	})
+
+	var out bytes.Buffer
+	_, err := ParseArgs("agentrepl", []string{"-h"}, &out)
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("ParseArgs(-h) error = %v, want flag.ErrHelp", err)
+	}
+	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)", "test-model", "effort: low, high  (default high)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("help output = %q, want %q", out.String(), want)
+		}
+	}
+	if constructed {
+		t.Fatal("help constructed a provider")
+	}
+}
+
+func TestWriteHelpListsDefaultCatalogInOrder(t *testing.T) {
+	// R-FUGT-CUKT
+	cat := catalog.Default()
+	var out bytes.Buffer
+	WriteHelp(&out, "agentrepl", cat)
+	help := out.String()
+
+	last := -1
+	for _, provider := range cat {
+		providerLine := fmt.Sprintf("  %-10s  (%s)", provider.Name, provider.EnvKey)
+		index := strings.Index(help, providerLine)
+		if index <= last {
+			t.Fatalf("provider line %q index = %d after %d in help:\n%s", providerLine, index, last, help)
+		}
+		last = index
+	}
+
+	modelsIndex := strings.Index(help, "models:\n")
+	if modelsIndex < 0 {
+		t.Fatalf("help = %q, want models section", help)
+	}
+	last = modelsIndex
+	for _, provider := range cat {
+		providerIndex := strings.Index(help[last:], "  "+provider.Name+"\n")
+		if providerIndex < 0 {
+			t.Fatalf("help = %q, want models group %s", help, provider.Name)
+		}
+		last += providerIndex
+		for _, model := range provider.Models {
+			modelIndex := strings.Index(help[last:], "    "+model)
+			if modelIndex < 0 {
+				t.Fatalf("help = %q, want model %s under %s", help, model, provider.Name)
+			}
+			last += modelIndex
+		}
+	}
+}
+
+func TestWriteHelpGoldenReasoningClausesByKind(t *testing.T) {
+	// R-FVOP-QMBI
+	cat := []catalog.Provider{
+		{
+			Name:   "enum",
+			EnvKey: "ENUM_KEY",
+			Models: []string{"enum-model"},
+			Reasoning: staticReasoning{"enum-model": {
+				Term: "effort", Kind: agentkit.ReasoningEnum,
+				Levels: []string{"low", "high"}, Default: agentkit.Level("high"),
+			}},
+		},
+		{
+			Name:   "range",
+			EnvKey: "RANGE_KEY",
+			Models: []string{"range-model"},
+			Reasoning: staticReasoning{"range-model": {
+				Term: "thinking budget", Kind: agentkit.ReasoningRange,
+				Min: 0, Max: 24576,
+				Sentinels: []agentkit.Sentinel{{Value: 0, Meaning: "off"}, {Value: -1, Meaning: "dynamic"}},
+				Default:   agentkit.Budget(-1),
+			}},
+		},
+		{
+			Name:   "toggle",
+			EnvKey: "TOGGLE_KEY",
+			Models: []string{"toggle-model"},
+			Reasoning: staticReasoning{"toggle-model": {
+				Term: "thinking", Kind: agentkit.ReasoningToggle, CanDisable: true,
+			}},
+		},
+	}
+
+	var out bytes.Buffer
+	WriteHelp(&out, "agentrepl-test", cat)
+	want, err := os.ReadFile(filepath.Join("testdata", "help_reasoning.golden"))
+	if err != nil {
+		t.Fatalf("reading golden: %v", err)
+	}
+	if out.String() != string(want) {
+		t.Fatalf("help output mismatch\nwant:\n%s\ngot:\n%s", want, out.String())
+	}
+}
+
+func TestWriteHelpIncludesModelsWithoutReasoningSpec(t *testing.T) {
+	// R-FWWM-4E27
+	cat := []catalog.Provider{{
+		Name:      "plain",
+		EnvKey:    "PLAIN_KEY",
+		Models:    []string{"plain-model"},
+		Reasoning: staticReasoning{},
+	}}
+	var out bytes.Buffer
+	WriteHelp(&out, "agentrepl", cat)
+	help := out.String()
+	if !strings.Contains(help, "plain-model") || !strings.Contains(help, "(no reasoning control)") {
+		t.Fatalf("help = %q, want plain model with no-reasoning clause", help)
+	}
+}
+
+func TestWriteHelpDoesNotConstructProviders(t *testing.T) {
+	// R-FY4I-I5SW
+	constructed := false
+	cat := []catalog.Provider{{
+		Name:   "credential-blind",
+		EnvKey: "SECRET_KEY",
+		Models: []string{"model"},
+		New: func(string, catalog.Options) agentkit.Provider {
+			constructed = true
+			return nil
+		},
+		Reasoning: staticReasoning{},
+	}}
+	var out bytes.Buffer
+	WriteHelp(&out, "agentrepl", cat)
+	if constructed {
+		t.Fatal("WriteHelp constructed a provider")
+	}
+	if !strings.Contains(out.String(), "SECRET_KEY") || !strings.Contains(out.String(), "model") {
+		t.Fatalf("help = %q, want env-key documentation and model without credentials", out.String())
 	}
 }
 
@@ -746,6 +907,21 @@ func runScriptWithProviderContext(t *testing.T, ctx context.Context, script stri
 type scriptedProvider struct {
 	rounds   []*agentkit.RoundTrip
 	requests []agentkit.Request
+}
+
+type staticReasoning map[string]agentkit.ReasoningSpec
+
+func (s staticReasoning) ReasoningSpec(model string) (agentkit.ReasoningSpec, bool) {
+	spec, ok := s[model]
+	return spec, ok
+}
+
+func (s staticReasoning) SupportedReasoning() map[string]agentkit.ReasoningSpec {
+	out := make(map[string]agentkit.ReasoningSpec, len(s))
+	for model, spec := range s {
+		out[model] = spec
+	}
+	return out
 }
 
 func newScriptedProvider(rounds ...*agentkit.RoundTrip) *scriptedProvider {

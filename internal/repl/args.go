@@ -10,6 +10,9 @@ func ParseArgs(name string, args []string, out io.Writer) (Options, error) {
 	var opts Options
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(out)
+	flags.Usage = func() {
+		WriteHelp(out, name, defaultCatalog())
+	}
 	flags.Var((*configFlags)(&opts.Config), "c", "config key=value")
 	flags.BoolVar(&opts.Raw, "raw", false, "emit raw JSONL")
 

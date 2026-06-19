@@ -146,7 +146,7 @@ The `Renderer` interface gains `Warning(agentkit.Warning)`, implemented by both 
 
 **Done when:** R-G5FW-SS92 (decorated renders a `Warning` in its own treatment, distinct from `Error` (golden); raw emits exactly one JSON line carrying `Setting`/`Code`/`Detail`), R-G480-F0ID (the driver calls `Warning` once per entry in `stream.Warnings()`, before `Usage`/`Error`, verbatim; zero calls when there are none), and R-G6NT-6JZR (a non-native `gen.reasoning` value from the Phase 11 carve-out yields an agentkit reasoning warning the driver relays, the turn completing with the model's default — exercised through the real `Conversation` + fake `Provider` seam emitting a `Warning`) are covered by clearly-named tests (repl-level captured stdout + render goldens) and the suite is green.
 
-### Phase 14 — Self-describing `--help` catalog · ⬜ not started
+### Phase 14 — Self-describing `--help` catalog · ✅ done
 
 *Realizes design Decision 12 (the credential-blind `--help` catalog) and the Decision 4 `-h`/`-help` interception row. Depends on Phase 12 (the catalog `Reasoning` field it reads) and Phase 7a (`ParseArgs` and the launch surface it hooks).*
 

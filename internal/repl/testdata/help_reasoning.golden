@@ -1,0 +1,19 @@
+usage: agentrepl-test [-c key=value ...] [-raw] [-h]
+
+flags:
+  -c key=value   set an agentkit config value (repeatable); see config keys via /help at runtime
+  -raw           emit the raw, undecorated message stream
+  -h, -help      show this catalog and exit
+
+providers:
+  enum        (ENUM_KEY)
+  range       (RANGE_KEY)
+  toggle      (TOGGLE_KEY)
+
+models:
+  enum
+    enum-model               effort: low, high  (default high)
+  range
+    range-model              thinking budget: 0–24576  (0=off, -1=dynamic, default dynamic)
+  toggle
+    toggle-model             thinking: on/off  (default on)
