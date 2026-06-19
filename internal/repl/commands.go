@@ -90,7 +90,7 @@ func init() {
 			run: func(s *state, args string) error {
 				switch strings.TrimSpace(args) {
 				case "decorated":
-					s.rend = render.NewDecorated(s.io.Out, s.color)
+					s.rend = render.NewDecorated(s.io.Out, s.color, s.io.IsTTY)
 				case "raw":
 					s.rend = render.NewRaw(s.io.Out)
 				default:

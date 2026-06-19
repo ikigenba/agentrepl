@@ -60,7 +60,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		target: target,
 		cat:    cat,
 		io:     d.IO,
-		rend:   newRenderer(d.IO.Out, color, opts.Raw),
+		rend:   newRenderer(d.IO.Out, color, d.IO.IsTTY, opts.Raw),
 		color:  color,
 		getenv: d.Getenv,
 	}
@@ -70,13 +70,14 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		state.rend.Summary(conv.TotalUsage(), conv.TotalCost())
 	}()
 
-	lines := scanLines(ctx, d.IO.In)
+	scanner := bufio.NewScanner(d.IO.In)
 	for {
+		state.rend.Prompt()
 		select {
 		case <-ctx.Done():
 			state.rend.Notice("interrupted")
 			return 130
-		case result, ok := <-lines:
+		case result, ok := <-scanLine(ctx, scanner):
 			if !ok {
 				return 0
 			}
@@ -107,17 +108,13 @@ type scanResult struct {
 	err  error
 }
 
-func scanLines(ctx context.Context, in io.Reader) <-chan scanResult {
+func scanLine(ctx context.Context, scanner *bufio.Scanner) <-chan scanResult {
 	results := make(chan scanResult, 1)
 	go func() {
 		defer close(results)
-		scanner := bufio.NewScanner(in)
-		for scanner.Scan() {
-			select {
-			case results <- scanResult{line: scanner.Text()}:
-			case <-ctx.Done():
-				return
-			}
+		if scanner.Scan() {
+			results <- scanResult{line: scanner.Text()}
+			return
 		}
 		if err := scanner.Err(); err != nil {
 			select {
@@ -145,15 +142,15 @@ func normalizeDeps(d Deps) Deps {
 	return d
 }
 
-func newRenderer(out io.Writer, color bool, raw bool) render.Renderer {
+func newRenderer(out io.Writer, color, tty, raw bool) render.Renderer {
 	if raw {
 		return render.NewRaw(out)
 	}
-	return render.NewDecorated(out, color)
+	return render.NewDecorated(out, color, tty)
 }
 
 func handleTurn(ctx context.Context, s *state, text string) {
-	s.rend.Prompt(text)
+	s.rend.Input(text)
 	stream := s.conv.Send(ctx, text)
 	for ev := range stream.Events() {
 		s.rend.Event(ev)

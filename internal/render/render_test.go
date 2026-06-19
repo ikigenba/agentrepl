@@ -16,15 +16,15 @@ import (
 
 var update = flag.Bool("update", false, "update golden files")
 
-func TestDecoratedGoldenRendersKindsUsageCostsAndToolErrors(t *testing.T) {
+func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *testing.T) {
 	// R-LL9K-SKDQ
 	// R-LRD2-PF37
-	// R-ONJY-6PJG
-	// R-OORU-KHA5
+	// R-JFBW-TYU8
 	var buf bytes.Buffer
-	render := NewDecorated(&buf, false)
+	render := NewDecorated(&buf, false, false)
 
-	render.Prompt("hello")
+	render.Prompt()
+	render.Input("hello")
 	render.Event(agentkit.ReasoningDelta{Text: "checking"})
 	render.Event(agentkit.MessageDone{})
 	render.Event(agentkit.TextDelta{Text: "Hi there"})
@@ -38,25 +38,50 @@ func TestDecoratedGoldenRendersKindsUsageCostsAndToolErrors(t *testing.T) {
 	got := buf.String()
 	assertGolden(t, "decorated.golden", got)
 	for _, want := range []string{
-		"you › hello",
 		"reasoning › checking",
 		"assistant › Hi there",
 		`tool call › read {"path":"missing.txt"}`,
 		"tool result › read: contents",
 		"tool error › read: open missing.txt: no such file",
-		"in=123 cache(r=10 w=5) out=456 reasoning=78 total=999",
-		"$0.001234 turn   $0.005678 session",
+		"summary",
+		"in=223 cache(r=20 w=15) out=556 reasoning=88 total=1111",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("decorated output missing %q:\n%s", want, got)
 		}
+	}
+	for _, notWant := range []string{"you › hello", "─", "$0.001234 turn"} {
+		if strings.Contains(got, notWant) {
+			t.Fatalf("decorated output contains %q:\n%s", notWant, got)
+		}
+	}
+}
+
+func TestDecoratedTTYPromptGoldenAndInputNoEcho(t *testing.T) {
+	// R-JFBW-TYU8
+	var tty bytes.Buffer
+	ttyRender := NewDecorated(&tty, false, true)
+	ttyRender.Prompt()
+	ttyRender.Input("hello")
+	assertGolden(t, "decorated_tty_prompt.golden", tty.String())
+	if strings.Contains(tty.String(), "hello") || strings.Contains(tty.String(), "\n") {
+		t.Fatalf("tty prompt output = %q, want prompt only with no echoed input or newline", tty.String())
+	}
+
+	var nonTTY bytes.Buffer
+	nonTTYRender := NewDecorated(&nonTTY, false, false)
+	nonTTYRender.Prompt()
+	nonTTYRender.Input("hello")
+	assertGolden(t, "decorated_non_tty_prompt.golden", nonTTY.String())
+	if nonTTY.Len() != 0 {
+		t.Fatalf("non-tty prompt output = %q, want empty", nonTTY.String())
 	}
 }
 
 func TestDecoratedStreamsDeltasIncrementally(t *testing.T) {
 	// R-LMHH-6C4F
 	var buf bytes.Buffer
-	render := NewDecorated(&buf, false)
+	render := NewDecorated(&buf, false, false)
 
 	render.Event(agentkit.TextDelta{Text: "Hel"})
 	if got := buf.String(); got != "assistant › Hel" {
@@ -68,7 +93,7 @@ func TestDecoratedStreamsDeltasIncrementally(t *testing.T) {
 	}
 
 	buf.Reset()
-	render = NewDecorated(&buf, false)
+	render = NewDecorated(&buf, false, false)
 	render.Event(agentkit.ReasoningDelta{Text: "check"})
 	if got := buf.String(); got != "reasoning › check" {
 		t.Fatalf("after ReasoningDelta = %q, want bytes written immediately", got)
@@ -78,8 +103,8 @@ func TestDecoratedStreamsDeltasIncrementally(t *testing.T) {
 func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 	// R-LNPD-K3V4
 	var color bytes.Buffer
-	colorRender := NewDecorated(&color, true)
-	colorRender.Prompt("hello")
+	colorRender := NewDecorated(&color, true, true)
+	colorRender.Prompt()
 	colorRender.Event(agentkit.TextDelta{Text: "Hi"})
 	colorRender.Event(agentkit.ToolResult{Name: "read", Output: "missing", IsError: true})
 	colorRender.Error(assertErr("boom"))
@@ -91,8 +116,8 @@ func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 	assertGolden(t, "decorated_color.golden", visibleANSI(gotColor))
 
 	var plain bytes.Buffer
-	plainRender := NewDecorated(&plain, false)
-	plainRender.Prompt("hello")
+	plainRender := NewDecorated(&plain, false, true)
+	plainRender.Prompt()
 	plainRender.Event(agentkit.TextDelta{Text: "Hi"})
 	plainRender.Event(agentkit.ToolResult{Name: "read", Output: "missing", IsError: true})
 	plainRender.Error(assertErr("boom"))
@@ -106,12 +131,15 @@ func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 func TestRawJSONLGoldenSkipsDeltasAndCarriesUsageSummaryAndToolErrors(t *testing.T) {
 	// R-LOX9-XVLT
 	// R-LRD2-PF37
+	// R-ONJY-6PJG
+	// R-OORU-KHA5
 	// R-OR7N-C0RJ
 	// R-OW38-V3QB
 	var buf bytes.Buffer
 	render := NewRaw(&buf)
 
-	render.Prompt("hello")
+	render.Prompt()
+	render.Input("hello")
 	render.Event(agentkit.TextDelta{Text: "ignored"})
 	render.Event(agentkit.ReasoningDelta{Text: "ignored"})
 	render.Event(agentkit.MessageDone{Message: agentkit.Message{
@@ -160,6 +188,26 @@ func TestRawJSONLGoldenSkipsDeltasAndCarriesUsageSummaryAndToolErrors(t *testing
 	}
 }
 
+func TestDecoratedUsageNoopAndRawUsageEmitsPerTurnLine(t *testing.T) {
+	// R-JGJT-7QKX
+	var decorated bytes.Buffer
+	decoratedRender := NewDecorated(&decorated, false, false)
+	decoratedRender.Usage(turnUsage(), agentkit.Cost(1_234_000), agentkit.Cost(5_678_000))
+	if decorated.Len() != 0 {
+		t.Fatalf("decorated usage output = %q, want empty", decorated.String())
+	}
+
+	var raw bytes.Buffer
+	rawRender := NewRaw(&raw)
+	rawRender.Usage(turnUsage(), agentkit.Cost(1_234_000), agentkit.Cost(5_678_000))
+	got := raw.String()
+	if !strings.Contains(got, `"type":"usage"`) ||
+		!strings.Contains(got, `"turn_cost_usd":"0.001234"`) ||
+		!strings.Contains(got, `"session_cost_usd":"0.005678"`) {
+		t.Fatalf("raw usage output = %q, want per-turn usage JSON", got)
+	}
+}
+
 func TestWarningGoldenRendersDistinctTreatmentAndRawCarriesFields(t *testing.T) {
 	// R-G5FW-SS92
 	warning := agentkit.Warning{
@@ -169,7 +217,7 @@ func TestWarningGoldenRendersDistinctTreatmentAndRawCarriesFields(t *testing.T) 
 	}
 
 	var decorated bytes.Buffer
-	decoratedRender := NewDecorated(&decorated, false)
+	decoratedRender := NewDecorated(&decorated, false, false)
 	decoratedRender.Warning(warning)
 	decoratedRender.Error(assertErr("turn failed"))
 	gotDecorated := decorated.String()

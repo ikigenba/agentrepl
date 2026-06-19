@@ -342,7 +342,7 @@ func TestClearEmptiesHistoryAndLeavesSpend(t *testing.T) {
 	}
 	s := &state{
 		conv: conv,
-		rend: render.NewDecorated(&out, false),
+		rend: render.NewDecorated(&out, false, false),
 	}
 	before := conv.TotalCost()
 	if err := commands["clear"].run(s, ""); err != nil {
@@ -376,8 +376,8 @@ func TestRenderCommandSwitchesRenderer(t *testing.T) {
 		!strings.Contains(out, `{"type":"usage"`) {
 		t.Fatalf("stdout = %q, want raw JSON turn after /render raw", out)
 	}
-	if !strings.Contains(out, "you › hello decorated") ||
-		!strings.Contains(out, "assistant › decorated ok") {
+	if !strings.Contains(out, "assistant › decorated ok") ||
+		strings.Contains(out, "hello decorated") {
 		t.Fatalf("stdout = %q, want decorated turn after /render decorated", out)
 	}
 }
@@ -440,10 +440,39 @@ func TestTurnMessageDrivesConversationAndEmptyLineIsIgnored(t *testing.T) {
 	if len(provider.requests) != 1 {
 		t.Fatalf("provider request count = %d, want 1", len(provider.requests))
 	}
-	if !strings.Contains(out, "you › hello") || !strings.Contains(out, "assistant › hi") {
+	if !strings.Contains(out, "assistant › hi") || strings.Contains(out, "you › hello") {
 		t.Fatalf("stdout = %q, want completed turn for non-command input", out)
 	}
 	assertLogTypes(t, log, []string{"turn_start", "message", "usage", "turn_end", "summary"})
+}
+
+func TestTTYPromptPrecedesEachInputReadAndDoesNotEchoInput(t *testing.T) {
+	// R-JFBW-TYU8
+	provider := newScriptedProvider(successRound("hi", usageOne()))
+	script := strings.Join([]string{
+		"/help",
+		"",
+		"/set provider test",
+		"/set model test-model",
+		"hello",
+		"/exit",
+	}, "\n") + "\n"
+	result := runScriptWithProviderContextAndIO(t, context.Background(), script, Options{}, provider, IO{IsTTY: true})
+	if result.code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", result.code, result.stderr)
+	}
+	if got := strings.Count(result.stdout, "you › "); got < 6 {
+		t.Fatalf("stdout = %q, prompt count = %d, want prompt before command, empty line, turn, and exit reads", result.stdout, got)
+	}
+	if !strings.Contains(result.stdout, "you › notice › /clear") {
+		t.Fatalf("stdout = %q, want first prompt to precede /help output", result.stdout)
+	}
+	if !strings.Contains(result.stdout, "you › assistant › hi") {
+		t.Fatalf("stdout = %q, want turn prompt to precede assistant output", result.stdout)
+	}
+	if strings.Contains(result.stdout, "you › hello") {
+		t.Fatalf("stdout = %q, decorated Input echoed entered turn", result.stdout)
+	}
 }
 
 func TestFailedTurnRendersErrorSkipsUsageAndContinues(t *testing.T) {
@@ -458,11 +487,11 @@ func TestFailedTurnRendersErrorSkipsUsageAndContinues(t *testing.T) {
 	if !strings.Contains(out, "error › provider failed") {
 		t.Fatalf("stdout = %q, want rendered turn error", out)
 	}
-	if !strings.Contains(out, "you › recover") || !strings.Contains(out, "assistant › after error") {
+	if !strings.Contains(out, "assistant › after error") || strings.Contains(out, "you › recover") {
 		t.Fatalf("stdout = %q, want loop to accept next input", out)
 	}
-	if strings.Count(out, "· cost     $0.002000 turn") != 1 {
-		t.Fatalf("stdout = %q, want only successful turn usage", out)
+	if strings.Contains(out, "· cost     $0.002000 turn") {
+		t.Fatalf("stdout = %q, decorated output should suppress per-turn usage", out)
 	}
 	if !strings.Contains(out, "· cost     $0.002000 session") {
 		t.Fatalf("stdout = %q, want errored turn excluded from session cumulative", out)
@@ -788,7 +817,7 @@ func TestCommandTableSetPropagatesConfigSentinels(t *testing.T) {
 			}},
 			Getenv: func(string) string { return "" },
 		},
-		rend: render.NewDecorated(&out, false),
+		rend: render.NewDecorated(&out, false, false),
 	}
 	err := commands["set"].run(s, "missing value")
 	if !errors.Is(err, config.ErrUnknownKey) {
@@ -885,6 +914,11 @@ type runResult struct {
 
 func runScriptWithProviderContext(t *testing.T, ctx context.Context, script string, opts Options, provider agentkit.Provider) runResult {
 	t.Helper()
+	return runScriptWithProviderContextAndIO(t, ctx, script, opts, provider, IO{})
+}
+
+func runScriptWithProviderContextAndIO(t *testing.T, ctx context.Context, script string, opts Options, provider agentkit.Provider, ioDeps IO) runResult {
+	t.Helper()
 	originalCatalog := defaultCatalog
 	defaultCatalog = func() []catalog.Provider {
 		return []catalog.Provider{{
@@ -901,16 +935,18 @@ func runScriptWithProviderContext(t *testing.T, ctx context.Context, script stri
 	})
 
 	var out, errOut bytes.Buffer
+	ioDeps.In = strings.NewReader(script)
+	ioDeps.Out = &out
+	ioDeps.Err = &errOut
 	logDir := t.TempDir()
 	code := Run(ctx, Deps{
-		IO: IO{
-			In:  strings.NewReader(script),
-			Out: &out,
-			Err: &errOut,
-		},
+		IO: ioDeps,
 		Getenv: func(key string) string {
 			if key == "TEST_API_KEY" {
 				return "secret"
+			}
+			if key == "NO_COLOR" && ioDeps.IsTTY {
+				return "1"
 			}
 			return ""
 		},

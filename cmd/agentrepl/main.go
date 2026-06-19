@@ -45,7 +45,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
 			In:    in,
 			Out:   out,
 			Err:   errOut,
-			IsTTY: isTTY && os.Getenv("NO_COLOR") == "",
+			IsTTY: isTTY,
 		},
 		Getenv: os.Getenv,
 		Now:    time.Now,

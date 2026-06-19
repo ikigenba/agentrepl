@@ -8,9 +8,10 @@ import (
 	"github.com/ikigenba/agentkit"
 )
 
-// Renderer presents one turn's prompt, streamed events, outcome, and spend.
+// Renderer presents the input prompt, streamed events, outcome, and spend.
 type Renderer interface {
-	Prompt(text string)
+	Prompt()
+	Input(text string)
 	Event(ev agentkit.Event)
 	Usage(turn agentkit.Usage, turnCost, total agentkit.Cost)
 	Summary(total agentkit.Usage, totalCost agentkit.Cost)
@@ -20,8 +21,8 @@ type Renderer interface {
 }
 
 // NewDecorated returns the operator-facing renderer.
-func NewDecorated(out io.Writer, color bool) Renderer {
-	return &decoratedRenderer{out: out, color: color}
+func NewDecorated(out io.Writer, color, tty bool) Renderer {
+	return &decoratedRenderer{out: out, color: color, tty: tty}
 }
 
 // NewRaw returns the machine-readable JSONL renderer.
@@ -32,12 +33,19 @@ func NewRaw(out io.Writer) Renderer {
 type decoratedRenderer struct {
 	out       io.Writer
 	color     bool
+	tty       bool
 	streaming bool
 }
 
-func (r *decoratedRenderer) Prompt(text string) {
+func (r *decoratedRenderer) Prompt() {
 	r.finishStream()
-	fmt.Fprintf(r.out, "%syou ›%s %s\n", r.paint(ansiBold), r.paint(ansiReset), text)
+	if !r.tty {
+		return
+	}
+	fmt.Fprintf(r.out, "%syou ›%s ", r.paint(ansiBold), r.paint(ansiReset))
+}
+
+func (r *decoratedRenderer) Input(string) {
 }
 
 func (r *decoratedRenderer) Event(ev agentkit.Event) {
@@ -56,7 +64,6 @@ func (r *decoratedRenderer) Event(ev agentkit.Event) {
 		fmt.Fprint(r.out, ev.Text)
 	case agentkit.MessageDone:
 		r.finishStream()
-		fmt.Fprintln(r.out, "─")
 	case agentkit.ToolUse:
 		r.finishStream()
 		fmt.Fprintf(r.out, "%stool call ›%s %s %s\n", r.paint(ansiCyan), r.paint(ansiReset), ev.Name, string(ev.Input))
@@ -71,16 +78,6 @@ func (r *decoratedRenderer) Event(ev agentkit.Event) {
 }
 
 func (r *decoratedRenderer) Usage(turn agentkit.Usage, turnCost, total agentkit.Cost) {
-	r.finishStream()
-	fmt.Fprintf(r.out, "· tokens  in=%d cache(r=%d w=%d) out=%d reasoning=%d total=%d\n",
-		turn.InputUncached,
-		turn.CacheReadInput,
-		turn.CacheWriteInput,
-		turn.Output,
-		turn.ReasoningOutput,
-		turn.Total,
-	)
-	fmt.Fprintf(r.out, "· cost     $%.6f turn   $%.6f session\n", turnCost.USD(), total.USD())
 }
 
 func (r *decoratedRenderer) Summary(total agentkit.Usage, totalCost agentkit.Cost) {
@@ -137,7 +134,10 @@ type rawRenderer struct {
 	out io.Writer
 }
 
-func (r rawRenderer) Prompt(text string) {
+func (r rawRenderer) Prompt() {
+}
+
+func (r rawRenderer) Input(text string) {
 	r.write(rawPrompt{Type: "prompt", Text: text})
 }
 
