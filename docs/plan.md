@@ -162,7 +162,7 @@ Rework the `spec.Kind` render routine inside `repl.WriteHelp` so each model's re
 
 **Done when:** R-6DEO-9TXQ (every model row leads with the literal `gen.reasoning=` key, byte-identical across models/providers, values in traditional CLI syntax — `{a|b|c}` for enum/toggle, `<…>` for range — copy-pasteable as `-c gen.reasoning=<value>`, native term only in the parenthetical) and the reworked R-FVOP-QMBI (the accepted-values group rendered from its `ReasoningSpec` by `Kind` with the native `Term`, sentinels, and default in the trailing parenthetical, golden across enum/range/toggle) are covered by clearly-named tests (the regenerated `WriteHelp` golden) and the suite is green.
 
-### Phase 16 — Flatten config keys & native reasoning keys · ⬜ not started
+### Phase 16 — Flatten config keys & native reasoning keys · ✅ done
 
 *Realizes design Decision 3 (amended: flat unprefixed keys; the single `gen.reasoning` key replaced by four native keys `effort`/`thinking_budget`/`thinking_level`/`thinking` with key-directed coercion; new `Target.ReasoningKey`). Depends on Phase 5 (the original config package) and Phase 11 (native `ReasoningValue` coercion).*
 

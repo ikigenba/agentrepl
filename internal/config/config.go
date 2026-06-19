@@ -18,6 +18,7 @@ type Target struct {
 	Getenv       func(string) string
 	ZaiBaseURL   string
 	ReasoningRaw string
+	ReasoningKey string
 }
 
 var (
@@ -100,56 +101,38 @@ var fields = map[string]field{
 			return nil
 		},
 	},
-	"gen.temperature": floatField(
+	"temperature": floatField(
 		func(c *agentkit.Conversation) **float64 { return &c.Gen.Temperature },
 	),
-	"gen.top_p": floatField(
+	"top_p": floatField(
 		func(c *agentkit.Conversation) **float64 { return &c.Gen.TopP },
 	),
-	"gen.max_tokens": intField(
+	"max_tokens": intField(
 		func(c *agentkit.Conversation) *int { return &c.Gen.MaxTokens },
 	),
-	"gen.reasoning": {
-		set: func(t *Target, raw string) error {
-			value, display, err := parseReasoning(raw)
-			if err != nil {
-				return err
-			}
-			t.Conv.Gen.Reasoning = value
-			t.ReasoningRaw = display
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.ReasoningRaw == "" {
-				return defaultValue
-			}
-			return t.ReasoningRaw
-		},
-		reset: func(t *Target) error {
-			t.Conv.Gen.Reasoning = agentkit.ReasoningValue{}
-			t.ReasoningRaw = ""
-			return nil
-		},
-	},
-	"retry.max_attempts": intField(
+	"effort":          reasoningLevelField("effort"),
+	"thinking_budget": reasoningBudgetField("thinking_budget"),
+	"thinking_level":  reasoningLevelField("thinking_level"),
+	"thinking":        reasoningToggleField("thinking"),
+	"max_attempts": intField(
 		func(c *agentkit.Conversation) *int { return &c.Retry.MaxAttempts },
 	),
-	"retry.base_delay": durationField(
+	"base_delay": durationField(
 		func(c *agentkit.Conversation) *time.Duration { return &c.Retry.BaseDelay },
 	),
-	"retry.max_delay": durationField(
+	"max_delay": durationField(
 		func(c *agentkit.Conversation) *time.Duration { return &c.Retry.MaxDelay },
 	),
-	"retry.max_elapsed": durationField(
+	"max_elapsed": durationField(
 		func(c *agentkit.Conversation) *time.Duration { return &c.Retry.MaxElapsed },
 	),
-	"retry.ignore_retry_after": boolField(
+	"ignore_retry_after": boolField(
 		func(c *agentkit.Conversation) *bool { return &c.Retry.IgnoreRetryAfter },
 	),
 	"tool_loop_limit": intField(
 		func(c *agentkit.Conversation) *int { return &c.MaxToolIterations },
 	),
-	"zai.base_url": {
+	"base_url": {
 		set: func(t *Target, raw string) error {
 			return setZaiBaseURL(t, raw)
 		},
@@ -312,20 +295,74 @@ func boolField(ptr func(*agentkit.Conversation) *bool) field {
 	}
 }
 
-func parseReasoning(raw string) (agentkit.ReasoningValue, string, error) {
+func reasoningLevelField(key string) field {
+	return reasoningField(key, func(display string) (agentkit.ReasoningValue, error) {
+		return agentkit.Level(display), nil
+	})
+}
+
+func reasoningBudgetField(key string) field {
+	return reasoningField(key, func(display string) (agentkit.ReasoningValue, error) {
+		budget, err := strconv.Atoi(display)
+		if err != nil {
+			return agentkit.ReasoningValue{}, fmt.Errorf("%w: %s: %v", ErrBadValue, display, err)
+		}
+		return agentkit.Budget(budget), nil
+	})
+}
+
+func reasoningToggleField(key string) field {
+	return reasoningField(key, func(display string) (agentkit.ReasoningValue, error) {
+		switch strings.ToLower(display) {
+		case "off":
+			return agentkit.DisableReasoning(), nil
+		case "on":
+			return agentkit.ReasoningValue{}, nil
+		default:
+			return agentkit.ReasoningValue{}, fmt.Errorf("%w: %s: want on or off", ErrBadValue, display)
+		}
+	})
+}
+
+func reasoningField(key string, parse func(string) (agentkit.ReasoningValue, error)) field {
+	return field{
+		set: func(t *Target, raw string) error {
+			value, display, err := parseReasoningValue(key, raw, parse)
+			if err != nil {
+				return err
+			}
+			t.Conv.Gen.Reasoning = value
+			t.ReasoningRaw = display
+			t.ReasoningKey = key
+			return nil
+		},
+		get: func(t *Target) string {
+			if t == nil || t.ReasoningRaw == "" || t.ReasoningKey != key {
+				return defaultValue
+			}
+			return t.ReasoningRaw
+		},
+		reset: resetReasoning,
+	}
+}
+
+func parseReasoningValue(key, raw string, parse func(string) (agentkit.ReasoningValue, error)) (agentkit.ReasoningValue, string, error) {
 	display := strings.TrimSpace(raw)
 	if display == "" {
-		return agentkit.ReasoningValue{}, "", fmt.Errorf("%w: gen.reasoning: empty value", ErrBadValue)
+		return agentkit.ReasoningValue{}, "", fmt.Errorf("%w: %s: empty value", ErrBadValue, key)
 	}
-	normalized := strings.ToLower(display)
-	switch normalized {
-	case "off", "disable", "disabled":
-		return agentkit.DisableReasoning(), display, nil
+	value, err := parse(display)
+	if err != nil {
+		return agentkit.ReasoningValue{}, "", err
 	}
-	if budget, err := strconv.Atoi(display); err == nil {
-		return agentkit.Budget(budget), display, nil
-	}
-	return agentkit.Level(display), display, nil
+	return value, display, nil
+}
+
+func resetReasoning(t *Target) error {
+	t.Conv.Gen.Reasoning = agentkit.ReasoningValue{}
+	t.ReasoningRaw = ""
+	t.ReasoningKey = ""
+	return nil
 }
 
 func getenv(t *Target) func(string) string {

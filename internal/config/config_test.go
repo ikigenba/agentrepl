@@ -51,7 +51,7 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "gen.temperature",
+			key: "temperature",
 			raw: "0.25",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -61,7 +61,7 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "gen.top_p",
+			key: "top_p",
 			raw: "0.9",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -71,7 +71,7 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "gen.max_tokens",
+			key: "max_tokens",
 			raw: "2048",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -81,20 +81,59 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "gen.reasoning",
+			key: "effort",
 			raw: "xhigh",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
 				if target.Conv.Gen.Reasoning != agentkit.Level("xhigh") {
 					t.Fatalf("reasoning = %v, want xhigh level", target.Conv.Gen.Reasoning)
 				}
-				if target.ReasoningRaw != "xhigh" {
-					t.Fatalf("ReasoningRaw = %q, want xhigh", target.ReasoningRaw)
+				if target.ReasoningRaw != "xhigh" || target.ReasoningKey != "effort" {
+					t.Fatalf("reasoning display = %q/%q, want xhigh/effort", target.ReasoningRaw, target.ReasoningKey)
 				}
 			},
 		},
 		{
-			key: "retry.max_attempts",
+			key: "thinking_budget",
+			raw: "8000",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Gen.Reasoning != agentkit.Budget(8000) {
+					t.Fatalf("reasoning = %v, want budget 8000", target.Conv.Gen.Reasoning)
+				}
+				if target.ReasoningRaw != "8000" || target.ReasoningKey != "thinking_budget" {
+					t.Fatalf("reasoning display = %q/%q, want 8000/thinking_budget", target.ReasoningRaw, target.ReasoningKey)
+				}
+			},
+		},
+		{
+			key: "thinking_level",
+			raw: "high",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Gen.Reasoning != agentkit.Level("high") {
+					t.Fatalf("reasoning = %v, want high level", target.Conv.Gen.Reasoning)
+				}
+				if target.ReasoningRaw != "high" || target.ReasoningKey != "thinking_level" {
+					t.Fatalf("reasoning display = %q/%q, want high/thinking_level", target.ReasoningRaw, target.ReasoningKey)
+				}
+			},
+		},
+		{
+			key: "thinking",
+			raw: "off",
+			assert: func(t *testing.T, target *Target) {
+				t.Helper()
+				if target.Conv.Gen.Reasoning != agentkit.DisableReasoning() {
+					t.Fatalf("reasoning = %v, want disable", target.Conv.Gen.Reasoning)
+				}
+				if target.ReasoningRaw != "off" || target.ReasoningKey != "thinking" {
+					t.Fatalf("reasoning display = %q/%q, want off/thinking", target.ReasoningRaw, target.ReasoningKey)
+				}
+			},
+		},
+		{
+			key: "max_attempts",
 			raw: "5",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -104,7 +143,7 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "retry.base_delay",
+			key: "base_delay",
 			raw: "500ms",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -114,7 +153,7 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "retry.max_delay",
+			key: "max_delay",
 			raw: "3s",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -124,7 +163,7 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "retry.max_elapsed",
+			key: "max_elapsed",
 			raw: "1m30s",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -134,7 +173,7 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "retry.ignore_retry_after",
+			key: "ignore_retry_after",
 			raw: "true",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -154,7 +193,7 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 			},
 		},
 		{
-			key: "zai.base_url",
+			key: "base_url",
 			raw: "https://api.z.ai/api/coding/paas/v4",
 			assert: func(t *testing.T, target *Target) {
 				t.Helper()
@@ -188,54 +227,72 @@ func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
 
 func TestUnknownKeyWrapsSentinelAndMutatesNothing(t *testing.T) {
 	// R-LZS4-BZQH
-	target := newTarget()
-	target.Conv.System = "original"
-	before := *target.Conv
+	for _, key := range []string{"missing.key", "gen.temperature", "gen.reasoning", "retry.max_attempts", "zai.base_url"} {
+		t.Run(key, func(t *testing.T) {
+			target := newTarget()
+			target.Conv.System = "original"
+			before := *target.Conv
 
-	err := Set(target, "missing.key", "value")
-	if !errors.Is(err, ErrUnknownKey) {
-		t.Fatalf("Set unknown key error = %v, want ErrUnknownKey", err)
-	}
-	if !strings.Contains(err.Error(), "missing.key") {
-		t.Fatalf("unknown key error = %q, want key name", err)
-	}
-	if !reflect.DeepEqual(before, *target.Conv) {
-		t.Fatalf("conversation mutated: before=%#v after=%#v", before, *target.Conv)
+			err := Set(target, key, "value")
+			if !errors.Is(err, ErrUnknownKey) {
+				t.Fatalf("Set unknown key error = %v, want ErrUnknownKey", err)
+			}
+			if !strings.Contains(err.Error(), key) {
+				t.Fatalf("unknown key error = %q, want key name", err)
+			}
+			if !reflect.DeepEqual(before, *target.Conv) {
+				t.Fatalf("conversation mutated: before=%#v after=%#v", before, *target.Conv)
+			}
+		})
 	}
 }
 
 func TestBadValueWrapsSentinelNamesKeyAndMutatesNothing(t *testing.T) {
 	// R-M100-PRH6
-	target := newTarget()
-	target.Conv.Gen.MaxTokens = 77
-	before := *target.Conv
+	for _, tc := range []struct {
+		key    string
+		raw    string
+		reason string
+	}{
+		{key: "temperature", raw: "not-a-float", reason: "invalid syntax"},
+		{key: "max_tokens", raw: "not-an-int", reason: "invalid syntax"},
+		{key: "base_delay", raw: "soon", reason: "invalid duration"},
+		{key: "ignore_retry_after", raw: "maybe", reason: "invalid syntax"},
+		{key: "tool_loop_limit", raw: "none", reason: "invalid syntax"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			target := newTarget()
+			target.Conv.System = "unchanged"
+			before := *target.Conv
 
-	err := Set(target, "gen.max_tokens", "not-an-int")
-	if !errors.Is(err, ErrBadValue) {
-		t.Fatalf("Set bad value error = %v, want ErrBadValue", err)
-	}
-	if !strings.Contains(err.Error(), "gen.max_tokens") || !strings.Contains(err.Error(), "invalid syntax") {
-		t.Fatalf("bad value error = %q, want key and parse reason", err)
-	}
-	if !reflect.DeepEqual(before, *target.Conv) {
-		t.Fatalf("conversation mutated: before=%#v after=%#v", before, *target.Conv)
+			err := Set(target, tc.key, tc.raw)
+			if !errors.Is(err, ErrBadValue) {
+				t.Fatalf("Set bad value error = %v, want ErrBadValue", err)
+			}
+			if !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), tc.reason) {
+				t.Fatalf("bad value error = %q, want key and parse reason", err)
+			}
+			if !reflect.DeepEqual(before, *target.Conv) {
+				t.Fatalf("conversation mutated: before=%#v after=%#v", before, *target.Conv)
+			}
+		})
 	}
 }
 
 func TestDefaultResetsUnsetValuesAndRendersDefault(t *testing.T) {
 	// R-M27X-3J7V
 	target := newTarget()
-	if err := Set(target, "gen.temperature", "0.8"); err != nil {
+	if err := Set(target, "temperature", "0.8"); err != nil {
 		t.Fatalf("set temperature: %v", err)
 	}
-	if err := Set(target, "gen.reasoning", "high"); err != nil {
+	if err := Set(target, "effort", "high"); err != nil {
 		t.Fatalf("set reasoning: %v", err)
 	}
 
-	if err := Set(target, "gen.temperature", "default"); err != nil {
+	if err := Set(target, "temperature", "default"); err != nil {
 		t.Fatalf("default temperature: %v", err)
 	}
-	if err := Set(target, "gen.reasoning", "default"); err != nil {
+	if err := Set(target, "thinking_budget", "default"); err != nil {
 		t.Fatalf("default reasoning: %v", err)
 	}
 
@@ -248,7 +305,10 @@ func TestDefaultResetsUnsetValuesAndRendersDefault(t *testing.T) {
 	if target.ReasoningRaw != "" {
 		t.Fatalf("ReasoningRaw = %q, want empty", target.ReasoningRaw)
 	}
-	for _, key := range []string{"gen.temperature", "gen.reasoning"} {
+	if target.ReasoningKey != "" {
+		t.Fatalf("ReasoningKey = %q, want empty", target.ReasoningKey)
+	}
+	for _, key := range []string{"temperature", "effort", "thinking_budget"} {
 		got, ok := Get(target, key)
 		if !ok || got != "default" {
 			t.Fatalf("Get(%q) = %q, %v; want default, true", key, got, ok)
@@ -329,11 +389,11 @@ func TestDumpReturnsAllKeysSortedWithCurrentValues(t *testing.T) {
 		{key: "provider", raw: "test"},
 		{key: "model", raw: "model-b"},
 		{key: "system", raw: "steady"},
-		{key: "gen.temperature", raw: "0.2"},
-		{key: "gen.reasoning", raw: "8000"},
-		{key: "retry.base_delay", raw: "750ms"},
+		{key: "temperature", raw: "0.2"},
+		{key: "thinking_budget", raw: "8000"},
+		{key: "base_delay", raw: "750ms"},
 		{key: "tool_loop_limit", raw: "9"},
-		{key: "zai.base_url", raw: "https://api.z.ai/api/coding/paas/v4"},
+		{key: "base_url", raw: "https://api.z.ai/api/coding/paas/v4"},
 	} {
 		if err := Set(target, pair.key, pair.raw); err != nil {
 			t.Fatalf("Set(%q): %v", pair.key, err)
@@ -342,20 +402,23 @@ func TestDumpReturnsAllKeysSortedWithCurrentValues(t *testing.T) {
 
 	got := Dump(target)
 	want := []string{
-		"gen.max_tokens=default",
-		"gen.reasoning=8000",
-		"gen.temperature=0.2",
-		"gen.top_p=default",
+		"base_delay=750ms",
+		"base_url=https://api.z.ai/api/coding/paas/v4",
+		"effort=default",
+		"ignore_retry_after=default",
+		"max_attempts=default",
+		"max_delay=default",
+		"max_elapsed=default",
+		"max_tokens=default",
 		"model=model-b",
 		"provider=test",
-		"retry.base_delay=750ms",
-		"retry.ignore_retry_after=default",
-		"retry.max_attempts=default",
-		"retry.max_delay=default",
-		"retry.max_elapsed=default",
 		"system=steady",
+		"temperature=0.2",
+		"thinking=default",
+		"thinking_budget=8000",
+		"thinking_level=default",
 		"tool_loop_limit=9",
-		"zai.base_url=https://api.z.ai/api/coding/paas/v4",
+		"top_p=default",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Dump() = %#v, want %#v", got, want)
@@ -369,79 +432,116 @@ func TestReasoningCoercesNativeShapeModelBlind(t *testing.T) {
 	// R-FZCE-VXJL
 	cases := []struct {
 		name string
+		key  string
 		raw  string
 		want agentkit.ReasoningValue
 	}{
-		{name: "off", raw: "off", want: agentkit.DisableReasoning()},
-		{name: "disable", raw: "disable", want: agentkit.DisableReasoning()},
-		{name: "disabled", raw: "disabled", want: agentkit.DisableReasoning()},
-		{name: "negative budget", raw: "-1", want: agentkit.Budget(-1)},
-		{name: "zero budget", raw: "0", want: agentkit.Budget(0)},
-		{name: "positive budget", raw: "8000", want: agentkit.Budget(8000)},
-		{name: "known level", raw: "high", want: agentkit.Level("high")},
-		{name: "provider native level", raw: "xhigh", want: agentkit.Level("xhigh")},
-		{name: "none stays a level", raw: "none", want: agentkit.Level("none")},
+		{name: "effort known level", key: "effort", raw: "high", want: agentkit.Level("high")},
+		{name: "effort provider native level", key: "effort", raw: "xhigh", want: agentkit.Level("xhigh")},
+		{name: "effort none stays a level", key: "effort", raw: "none", want: agentkit.Level("none")},
+		{name: "thinking level", key: "thinking_level", raw: "high", want: agentkit.Level("high")},
+		{name: "thinking level xhigh", key: "thinking_level", raw: "xhigh", want: agentkit.Level("xhigh")},
+		{name: "thinking level none", key: "thinking_level", raw: "none", want: agentkit.Level("none")},
+		{name: "negative budget", key: "thinking_budget", raw: "-1", want: agentkit.Budget(-1)},
+		{name: "zero budget", key: "thinking_budget", raw: "0", want: agentkit.Budget(0)},
+		{name: "positive budget", key: "thinking_budget", raw: "8000", want: agentkit.Budget(8000)},
+		{name: "thinking off", key: "thinking", raw: "off", want: agentkit.DisableReasoning()},
+		{name: "thinking on", key: "thinking", raw: "on", want: agentkit.ReasoningValue{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			target := newTarget()
-			if err := Set(target, "gen.reasoning", tc.raw); err != nil {
-				t.Fatalf("Set gen.reasoning returned error: %v", err)
+			if err := Set(target, tc.key, tc.raw); err != nil {
+				t.Fatalf("Set(%q, %q) returned error: %v", tc.key, tc.raw, err)
 			}
 			if target.Conv.Gen.Reasoning != tc.want {
 				t.Fatalf("Reasoning = %v, want %v", target.Conv.Gen.Reasoning, tc.want)
 			}
-			if target.ReasoningRaw != tc.raw {
-				t.Fatalf("ReasoningRaw = %q, want %q", target.ReasoningRaw, tc.raw)
+			if target.ReasoningRaw != tc.raw || target.ReasoningKey != tc.key {
+				t.Fatalf("reasoning display = %q/%q, want %q/%q", target.ReasoningRaw, target.ReasoningKey, tc.raw, tc.key)
 			}
 		})
 	}
 }
 
-func TestReasoningAcceptsNonNativeValuesButRejectsEmpty(t *testing.T) {
+func TestReasoningAcceptsNonNativeValuesButRejectsStructurallyUnusableInput(t *testing.T) {
 	// R-G0KB-9PAA
 	target := newTarget()
-	if err := Set(target, "gen.reasoning", "made-up-level"); err != nil {
-		t.Fatalf("Set non-native gen.reasoning returned error: %v", err)
+	if err := Set(target, "effort", "made-up-level"); err != nil {
+		t.Fatalf("Set non-native effort returned error: %v", err)
 	}
 	if target.Conv.Gen.Reasoning != agentkit.Level("made-up-level") {
 		t.Fatalf("Reasoning = %v, want made-up level", target.Conv.Gen.Reasoning)
 	}
-	if target.ReasoningRaw != "made-up-level" {
-		t.Fatalf("ReasoningRaw = %q, want made-up-level", target.ReasoningRaw)
+	if target.ReasoningRaw != "made-up-level" || target.ReasoningKey != "effort" {
+		t.Fatalf("reasoning display = %q/%q, want made-up-level/effort", target.ReasoningRaw, target.ReasoningKey)
 	}
 
 	beforeConv := *target.Conv
 	beforeRaw := target.ReasoningRaw
-	err := Set(target, "gen.reasoning", "")
-	if !errors.Is(err, ErrBadValue) {
-		t.Fatalf("Set empty gen.reasoning error = %v, want ErrBadValue", err)
-	}
-	if !strings.Contains(err.Error(), "gen.reasoning") || !strings.Contains(err.Error(), "empty") {
-		t.Fatalf("empty reasoning error = %q, want key and reason", err)
-	}
-	if !reflect.DeepEqual(beforeConv, *target.Conv) || target.ReasoningRaw != beforeRaw {
-		t.Fatalf("target mutated: before=%#v/%q after=%#v/%q", beforeConv, beforeRaw, *target.Conv, target.ReasoningRaw)
+	beforeKey := target.ReasoningKey
+	for _, tc := range []struct {
+		key    string
+		raw    string
+		reason string
+	}{
+		{key: "effort", raw: "", reason: "empty"},
+		{key: "thinking_level", raw: "", reason: "empty"},
+		{key: "thinking_budget", raw: "", reason: "empty"},
+		{key: "thinking_budget", raw: "high", reason: "invalid syntax"},
+		{key: "thinking", raw: "", reason: "empty"},
+		{key: "thinking", raw: "maybe", reason: "want on or off"},
+	} {
+		t.Run(tc.key+"="+tc.raw, func(t *testing.T) {
+			err := Set(target, tc.key, tc.raw)
+			if !errors.Is(err, ErrBadValue) {
+				t.Fatalf("Set(%q, %q) error = %v, want ErrBadValue", tc.key, tc.raw, err)
+			}
+			if !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), tc.reason) {
+				t.Fatalf("reasoning error = %q, want key and reason", err)
+			}
+			if !reflect.DeepEqual(beforeConv, *target.Conv) || target.ReasoningRaw != beforeRaw || target.ReasoningKey != beforeKey {
+				t.Fatalf("target mutated: before=%#v/%q/%q after=%#v/%q/%q", beforeConv, beforeRaw, beforeKey, *target.Conv, target.ReasoningRaw, target.ReasoningKey)
+			}
+		})
 	}
 }
 
 func TestReasoningDisplayUsesRawAndDefaultClears(t *testing.T) {
 	// R-G304-18RO
 	target := newTarget()
-	if got, ok := Get(target, "gen.reasoning"); !ok || got != "default" {
-		t.Fatalf("unset Get(gen.reasoning) = %q, %v; want default, true", got, ok)
+	for _, key := range []string{"effort", "thinking_budget", "thinking_level", "thinking"} {
+		if got, ok := Get(target, key); !ok || got != "default" {
+			t.Fatalf("unset Get(%q) = %q, %v; want default, true", key, got, ok)
+		}
 	}
-	if err := Set(target, "gen.reasoning", "xhigh"); err != nil {
-		t.Fatalf("Set gen.reasoning returned error: %v", err)
+	if err := Set(target, "effort", "xhigh"); err != nil {
+		t.Fatalf("Set effort returned error: %v", err)
 	}
-	if got, ok := Get(target, "gen.reasoning"); !ok || got != "xhigh" {
-		t.Fatalf("Get(gen.reasoning) = %q, %v; want xhigh, true", got, ok)
+	if got, ok := Get(target, "effort"); !ok || got != "xhigh" {
+		t.Fatalf("Get(effort) = %q, %v; want xhigh, true", got, ok)
 	}
-	if !slices.Contains(Dump(target), "gen.reasoning=xhigh") {
-		t.Fatalf("Dump missing gen.reasoning raw value: %v", Dump(target))
+	for _, key := range []string{"thinking_budget", "thinking_level", "thinking"} {
+		if got, ok := Get(target, key); !ok || got != "default" {
+			t.Fatalf("Get(%q) = %q, %v; want default, true", key, got, ok)
+		}
 	}
-	if err := Set(target, "gen.reasoning", "default"); err != nil {
-		t.Fatalf("default gen.reasoning returned error: %v", err)
+	if !slices.Contains(Dump(target), "effort=xhigh") || slices.Contains(Dump(target), "thinking_budget=xhigh") {
+		t.Fatalf("Dump did not render reasoning only under effort: %v", Dump(target))
+	}
+
+	if err := Set(target, "thinking_budget", "8000"); err != nil {
+		t.Fatalf("Set thinking_budget returned error: %v", err)
+	}
+	if got, ok := Get(target, "thinking_budget"); !ok || got != "8000" {
+		t.Fatalf("Get(thinking_budget) = %q, %v; want 8000, true", got, ok)
+	}
+	if got, ok := Get(target, "effort"); !ok || got != "default" {
+		t.Fatalf("Get(effort) = %q, %v; want default after overwrite, true", got, ok)
+	}
+
+	if err := Set(target, "thinking", "default"); err != nil {
+		t.Fatalf("default thinking returned error: %v", err)
 	}
 	if target.Conv.Gen.Reasoning != (agentkit.ReasoningValue{}) {
 		t.Fatalf("Reasoning = %v, want zero value", target.Conv.Gen.Reasoning)
@@ -449,8 +549,13 @@ func TestReasoningDisplayUsesRawAndDefaultClears(t *testing.T) {
 	if target.ReasoningRaw != "" {
 		t.Fatalf("ReasoningRaw = %q, want empty", target.ReasoningRaw)
 	}
-	if got, ok := Get(target, "gen.reasoning"); !ok || got != "default" {
-		t.Fatalf("defaulted Get(gen.reasoning) = %q, %v; want default, true", got, ok)
+	if target.ReasoningKey != "" {
+		t.Fatalf("ReasoningKey = %q, want empty", target.ReasoningKey)
+	}
+	for _, key := range []string{"effort", "thinking_budget", "thinking_level", "thinking"} {
+		if got, ok := Get(target, key); !ok || got != "default" {
+			t.Fatalf("defaulted Get(%q) = %q, %v; want default, true", key, got, ok)
+		}
 	}
 }
 
@@ -460,8 +565,8 @@ func TestZAIBaseURLStoresAndRebuildsOrderIndependently(t *testing.T) {
 
 	t.Run("base URL before provider", func(t *testing.T) {
 		target := newZAITarget()
-		if err := Set(target, "zai.base_url", override); err != nil {
-			t.Fatalf("Set zai.base_url returned error: %v", err)
+		if err := Set(target, "base_url", override); err != nil {
+			t.Fatalf("Set base_url returned error: %v", err)
 		}
 		if target.Conv.Provider != nil {
 			t.Fatalf("provider = %v, want nil before provider selection", target.Conv.Provider)
@@ -482,8 +587,8 @@ func TestZAIBaseURLStoresAndRebuildsOrderIndependently(t *testing.T) {
 		if got := providerBaseURL(t, target.Conv.Provider); got != "" {
 			t.Fatalf("initial provider baseURL = %q, want default", got)
 		}
-		if err := Set(target, "zai.base_url", override); err != nil {
-			t.Fatalf("Set zai.base_url returned error: %v", err)
+		if err := Set(target, "base_url", override); err != nil {
+			t.Fatalf("Set base_url returned error: %v", err)
 		}
 		if got := providerBaseURL(t, target.Conv.Provider); got != override {
 			t.Fatalf("provider baseURL = %q, want %q", got, override)
@@ -492,14 +597,14 @@ func TestZAIBaseURLStoresAndRebuildsOrderIndependently(t *testing.T) {
 
 	t.Run("default clears and rebuilds active zai", func(t *testing.T) {
 		target := newZAITarget()
-		if err := Set(target, "zai.base_url", override); err != nil {
-			t.Fatalf("Set zai.base_url returned error: %v", err)
+		if err := Set(target, "base_url", override); err != nil {
+			t.Fatalf("Set base_url returned error: %v", err)
 		}
 		if err := Set(target, "provider", "zai"); err != nil {
 			t.Fatalf("Set provider returned error: %v", err)
 		}
-		if err := Set(target, "zai.base_url", "default"); err != nil {
-			t.Fatalf("Set zai.base_url default returned error: %v", err)
+		if err := Set(target, "base_url", "default"); err != nil {
+			t.Fatalf("Set base_url default returned error: %v", err)
 		}
 		if target.ZaiBaseURL != "" {
 			t.Fatalf("ZaiBaseURL = %q, want cleared", target.ZaiBaseURL)
@@ -514,8 +619,8 @@ func TestZAIBaseURLStoresAndRebuildsOrderIndependently(t *testing.T) {
 		if err := Set(target, "provider", "other"); err != nil {
 			t.Fatalf("Set provider returned error: %v", err)
 		}
-		if err := Set(target, "zai.base_url", override); err != nil {
-			t.Fatalf("Set zai.base_url returned error: %v", err)
+		if err := Set(target, "base_url", override); err != nil {
+			t.Fatalf("Set base_url returned error: %v", err)
 		}
 		if target.ZaiBaseURL != override {
 			t.Fatalf("ZaiBaseURL = %q, want %q", target.ZaiBaseURL, override)

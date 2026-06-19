@@ -249,7 +249,7 @@ func TestRunBadStartupConfigIsFatalBeforeLoop(t *testing.T) {
 	}{
 		{name: "format", pair: "missing", want: "expected key=value"},
 		{name: "key", pair: "nope=value", want: "unknown config key"},
-		{name: "value", pair: "gen.max_tokens=not-int", want: "invalid value"},
+		{name: "value", pair: "max_tokens=not-int", want: "invalid value"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, errOut, code := runScript(t, "/help\n", Options{Config: []string{tc.pair}})
@@ -363,7 +363,7 @@ func TestHelpListsCommandsAndConfigKeys(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
 	}
-	for _, want := range []string{"/set", "/get", "/dump", "/clear", "/render", "/providers", "/help", "/exit", "/quit", "gen.temperature", "tool_loop_limit"} {
+	for _, want := range []string{"/set", "/get", "/dump", "/clear", "/render", "/providers", "/help", "/exit", "/quit", "temperature", "tool_loop_limit"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout = %q, want %q", out, want)
 		}
@@ -477,7 +477,7 @@ func TestNonNativeReasoningWarningRelayedAndTurnCompletesWithDefault(t *testing.
 	provider := &reasoningWarningProvider{}
 	result := runScriptWithProviderContext(t, context.Background(), "hello\n/exit\n", Options{
 		Raw:    true,
-		Config: []string{"gen.reasoning=xhigh"},
+		Config: []string{"effort=xhigh"},
 	}, provider)
 	if result.code != 0 {
 		t.Fatalf("Run exit code = %d, stderr %q", result.code, result.stderr)
@@ -700,7 +700,7 @@ func TestExpectedFailuresRenderAndDoNotEndLoop(t *testing.T) {
 	provider := newScriptedProvider(toolUseRound(), errorRound("provider failed"), successRound("after failures", usageOne()))
 	out, errOut, _, code := runScriptWithProvider(t, strings.Join([]string{
 		"/does-not-exist",
-		"/set gen.max_tokens nope",
+		"/set max_tokens nope",
 		"use missing file tool",
 		"provider failure",
 		"still alive",
