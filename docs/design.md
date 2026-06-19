@@ -38,7 +38,7 @@ Layout:
 github.com/ikigenba/agentrepl
   cmd/agentrepl/main.go    package main — composition root ONLY (parse flags, wire deps, run)
   internal/repl/           orchestrator: REPL loop, slash-command dispatch, turn drive
-  internal/config/         dotted-key namespace: parse key=value, apply to Conversation, dump, validate
+  internal/config/         flat-key namespace: parse key=value, apply to Conversation, dump, validate
   internal/render/         Renderer interface + decorated + raw implementations
   internal/catalog/        curated providers/models as data; env-key map; Provider construction
   internal/tools/          the four built-in tools (bash/read/write/edit)
@@ -123,7 +123,7 @@ var (
 - **`Reasoning` carries the sub-package's credential-blind introspector** (`anthropic.Reasoning`, `google.Reasoning`, `openai.Reasoning`, `zai.Reasoning`), set in `Default()` alongside `New`. It is **not** the constructed `Provider` and needs no key — it is the single source the `--help` catalog (Decision 12) reads each model's native reasoning term/values from, so agentrepl embeds **zero** provider reasoning knowledge. (Config coercion in Decision 3 is deliberately model-blind and does **not** consult it; runtime display, if added, would.) The curated `Models` list and the inspector are kept honest together by the anti-drift test below: every curated id must resolve to a `ReasoningSpec` just as it must resolve to a `Pricing`.
 - The model is **pre-validated** against the mirrored `Models` list, giving an immediate, clear error before any turn. The list is kept honest by a mechanical **anti-drift test**: every curated model must be accepted by its constructed provider's `Pricing` — drift fails the suite rather than passing silently.
 - **Z.ai is an ordinary catalog entry** — present and constructible when `ZAI_API_KEY` is set. Its known-broken-ness is a turn-time failure surfaced cleanly by the error-handling decision, not a catalog special case.
-- **Provider-construction overrides ride on `Options`, not new catalog entries.** `Build` threads an `Options` into `New`; today only the `zai` entry consumes it, mapping a non-empty `Options.BaseURL` to agentkit's `zai.WithBaseURL(...)` option and otherwise leaving Z.ai's baked-in default root (`https://api.z.ai/api/paas/v4`). The other three entries ignore `Options`. This is the seam the `zai.base_url` config key (Decision 3) drives — e.g. to point Z.ai at its coding-plan endpoint `https://api.z.ai/api/coding/paas/v4` — keeping the "new knob = new key, no bespoke flag" promise and avoiding a per-endpoint catalog entry.
+- **Provider-construction overrides ride on `Options`, not new catalog entries.** `Build` threads an `Options` into `New`; today only the `zai` entry consumes it, mapping a non-empty `Options.BaseURL` to agentkit's `zai.WithBaseURL(...)` option and otherwise leaving Z.ai's baked-in default root (`https://api.z.ai/api/paas/v4`). The other three entries ignore `Options`. This is the seam the `base_url` config key (Decision 3) drives — e.g. to point Z.ai at its coding-plan endpoint `https://api.z.ai/api/coding/paas/v4` — keeping the "new knob = new key, no bespoke flag" promise and avoiding a per-endpoint catalog entry.
 - `ErrMissingKey` is ordinary non-fatal data; the REPL renders it as a clear message and stays alive (resilience lives in the dispatch/error decisions). `EnvKey` is read via the injected `Getenv` — agentrepl never reads a credential file.
 
 **Rejected.**
@@ -156,7 +156,8 @@ type Target struct {
     Catalog      []catalog.Provider
     Getenv       func(string) string
     ZaiBaseURL   string // pending zai base-URL override; applied when zai is (re)built
-    ReasoningRaw string // last raw gen.reasoning value, for display only (ReasoningValue is opaque); "" = unset
+    ReasoningRaw string // last raw reasoning value, for display only (ReasoningValue is opaque); "" = unset
+    ReasoningKey string // which native reasoning key set it (effort|thinking_budget|thinking_level|thinking); "" = unset
 }
 
 // Set applies one key=value to t, or returns a clear, wrapped error.
@@ -180,39 +181,44 @@ var (
 )
 ```
 
-Internally a `map[string]field`, where `field` carries `set(t, raw) error` and `get(t) string`. The key namespace mirrors `agentkit.Conversation` + `GenSettings` + `RetryPolicy`:
+Internally a `map[string]field`, where `field` carries `set(t, raw) error` and `get(t) string`. The keys are **flat, unprefixed names** — one per agentkit setting (no `gen.`/`retry.`/`zai.` namespace; the prefix never routed anything, since `Set` is a single `map[string]field` lookup). Reasoning is exposed as the **native term of each model** rather than one generic key:
 
 | Key | Target field | Type |
 |-----|--------------|------|
 | `provider` | `Conv.Provider` (via catalog) | provider name |
 | `model` | `Conv.Model` | model id |
 | `system` | `Conv.System` | string |
-| `gen.temperature` | `Gen.Temperature` | `*float64` |
-| `gen.top_p` | `Gen.TopP` | `*float64` |
-| `gen.max_tokens` | `Gen.MaxTokens` | int |
-| `gen.reasoning` | `Gen.Reasoning` (`agentkit.ReasoningValue`) + `Target.ReasoningRaw` | native value, shape-directed — see "Reasoning is the carve-out" below |
-| `retry.max_attempts` | `Retry.MaxAttempts` | int |
-| `retry.base_delay` | `Retry.BaseDelay` | duration (e.g. `500ms`) |
-| `retry.max_delay` | `Retry.MaxDelay` | duration |
-| `retry.max_elapsed` | `Retry.MaxElapsed` | duration |
-| `retry.ignore_retry_after` | `Retry.IgnoreRetryAfter` | bool |
+| `temperature` | `Gen.Temperature` | `*float64` |
+| `top_p` | `Gen.TopP` | `*float64` |
+| `max_tokens` | `Gen.MaxTokens` | int |
+| `effort` | `Gen.Reasoning` via `Level(raw)` (+ `ReasoningRaw`/`ReasoningKey`) | native level — Anthropic opus/sonnet, OpenAI gpt-5.x, GLM 5.x |
+| `thinking_budget` | `Gen.Reasoning` via `Budget(int)` (+ `ReasoningRaw`/`ReasoningKey`) | native token budget — Anthropic haiku, Gemini 2.5 |
+| `thinking_level` | `Gen.Reasoning` via `Level(raw)` (+ `ReasoningRaw`/`ReasoningKey`) | native level — Gemini 3.x |
+| `thinking` | `Gen.Reasoning` via `on`→enabled / `off`→`DisableReasoning()` (+ `ReasoningRaw`/`ReasoningKey`) | native toggle — GLM 4.x |
+| `max_attempts` | `Retry.MaxAttempts` | int |
+| `base_delay` | `Retry.BaseDelay` | duration (e.g. `500ms`) |
+| `max_delay` | `Retry.MaxDelay` | duration |
+| `max_elapsed` | `Retry.MaxElapsed` | duration |
+| `ignore_retry_after` | `Retry.IgnoreRetryAfter` | bool |
 | `tool_loop_limit` | `Conv.MaxToolIterations` | int |
-| `zai.base_url` | `Target.ZaiBaseURL` → `catalog.Options.BaseURL` for the `zai` build | URL string |
+| `base_url` | `Target.ZaiBaseURL` → `catalog.Options.BaseURL` for the `zai` build | URL string |
+
+- **The four reasoning keys are aliases over one field.** `effort`, `thinking_budget`, `thinking_level`, and `thinking` all read and write the single `Conv.Gen.Reasoning` value — a model has exactly one reasoning setting. Setting any one records the raw value on `Target.ReasoningRaw` **and** the key used on `Target.ReasoningKey`, so `Get`/`Dump` can render the value under the key the operator actually typed (the `Level` constructor is shared by `effort` and `thinking_level`, so the value's shape alone cannot recover which key set it — `ReasoningKey` disambiguates). Setting a second reasoning key overwrites both the value and the recorded key.
 
 - **Unset sentinel.** Setting the literal value `default` resets *any* key to its zero/unset state (nil pointer, zero `ReasoningValue`, zero int/duration); `Dump`/`Get` render an unset key as `default`. One uniform rule, no per-key syntax.
 - **provider / model coupling** (loose, to avoid ordering deadlocks):
   - `provider=<name>` → catalog `Lookup` + `Build(getenv)`; sets `Conv.Provider`; surfaces `ErrUnknownProvider` / `ErrMissingKey` through `Set`; does not touch model.
   - `model=<id>` → if a provider is set, pre-validate with `HasModel` (clear `ErrUnknownModel` with "choose from: …"); else accept the string. The (provider, model) pair is ultimately validated by agentkit at `Send` and surfaced cleanly — a transient post-switch mismatch is a clear send-time error, never a crash.
-- **`zai.base_url` is a provider-construction override, applied through the catalog `Options` seam (Decision 2), and order-independent with `provider`.** A base URL is baked into the provider handle at construction, not a `Conversation` field, so the value is stored on `Target.ZaiBaseURL` and the `zai` provider is (re)built to apply it. `provider=zai` builds with `Options{BaseURL: t.ZaiBaseURL}`; setting `zai.base_url` while `zai` is already the active provider rebuilds it with the new root; setting it before any provider is selected just stores it for the eventual `zai` build — either order reaches the same state. `zai.base_url=default` clears the override (back to Z.ai's baked-in root) and rebuilds if zai is active. For a non-zai active provider the key is stored but not applied (a no-op against the live conversation until zai is selected).
-- **Reasoning is the carve-out: shape-directed, never model-validated in agentrepl, never a hard error.** `gen.reasoning` is the **one** key whose bad input does *not* return `ErrBadValue` (product success-criteria carve-out). Its `set` builds an `agentkit.ReasoningValue` from the raw string by **shape alone** — model-blind, so it works at launch before any model is selected and after a mid-conversation switch:
-  - raw (trim+lowercase) ∈ {`off`, `disable`, `disabled`} → `agentkit.DisableReasoning()`;
-  - raw parses as a base-10 integer, **including a leading `-`** (so sentinels like `-1`=dynamic and `0`=off pass) → `agentkit.Budget(n)`;
-  - otherwise → `agentkit.Level(raw)` **verbatim** — `"high"`, `"xhigh"`, `"minimal"`, and notably `"none"` (a real native effort level on gpt-5.x, **not** a disable token), passed through untouched.
+- **`base_url` is a provider-construction override, applied through the catalog `Options` seam (Decision 2), and order-independent with `provider`.** A base URL is baked into the provider handle at construction, not a `Conversation` field, so the value is stored on `Target.ZaiBaseURL` and the `zai` provider is (re)built to apply it. `provider=zai` builds with `Options{BaseURL: t.ZaiBaseURL}`; setting `base_url` while `zai` is already the active provider rebuilds it with the new root; setting it before any provider is selected just stores it for the eventual `zai` build — either order reaches the same state. `base_url=default` clears the override (back to Z.ai's baked-in root) and rebuilds if zai is active. For a non-zai active provider the key is stored but not applied (a no-op against the live conversation until zai is selected). (Z.ai is the only provider with a base-URL override today, so the flat key needs no provider qualifier; a second provider needing one would reintroduce a qualifier at that point.)
+- **Reasoning is the carve-out: key-directed, never model-validated in agentrepl, never a hard error on non-native input.** The four reasoning keys are the ones whose *non-native* value does *not* return `ErrBadValue` (product success-criteria carve-out). The **key name** — not the value's shape — picks the `agentkit.ReasoningValue` constructor, so coercion is model-blind and works at launch before any model is selected and after a mid-conversation switch:
+  - `effort` and `thinking_level` → `agentkit.Level(raw)` **verbatim** — `"high"`, `"xhigh"`, `"minimal"`, `"max"`, and notably `"none"` (a real native effort level on gpt-5.x, **not** a disable token), passed through untouched.
+  - `thinking_budget` → `agentkit.Budget(n)`, where `raw` parses as a base-10 integer **including a leading `-`** (so sentinels like `-1`=dynamic and `0`=off pass). A non-integer is *structurally* unusable for this key and returns `ErrBadValue`.
+  - `thinking` → `off`→`agentkit.DisableReasoning()`; `on`→the unset (zero) `ReasoningValue`, i.e. the model's native default, which for a toggle model is thinking-enabled (agentkit renders an unset toggle as `on`). `on` is recorded on `ReasoningRaw`/`ReasoningKey` for display even though the underlying value is the unset zero. Any token other than `on`/`off` is structurally unusable and returns `ErrBadValue`.
 
-  The built value is assigned to `Conv.Gen.Reasoning` and the raw string is stored on `Target.ReasoningRaw` for display. agentrepl does **not** consult the active model's `ReasoningSpec` here and does **not** judge whether the value is native — that judgment, and the warn-and-default, are agentkit's at request-build time (D6), which is the only place the *currently-selected* model is authoritative (a value valid for model A may be invalid for model B after a switch). A non-native value is therefore accepted by `Set` without error, stored, and later **warned + defaulted** by agentkit, with agentrepl relaying the `Warning` (Decision 5). The sole `set`-time failure is a structurally unusable input (an empty value), which returns `ErrBadValue` like any key.
-  - **Display.** `Get`/`Dump` render `gen.reasoning` from `Target.ReasoningRaw` (the native string the operator gave), and an unset value (`ReasoningRaw == ""`) as `default` — the same uniform unset rendering every other key uses. **Runtime `/get`/`/dump` show only the current value (and `default` for unset); they deliberately do *not* reprint the active model's accepted-values catalog** — that discovery view is `--help`-only (Decision 12), keeping the runtime surface thin and matching the product, which mandates the catalog for `--help` alone. The native default *value* shown in `--help` comes from `spec.Default`, not from this field.
-  - **`default` resets it** to the unset `ReasoningValue` zero (model default) and clears `ReasoningRaw`, via the uniform unset rule above — no reasoning-specific syntax.
-  - Reasoning is **excluded from the generic invalid-value error coverage**: the generic error-path id asserts that path for every *other* key; reasoning's "no hard error on non-native input" is asserted by its own id below.
+  The key name resolves the ambiguities the old single-key scheme had to guess at by shape: with `effort`/`thinking_level` the value is *always* a level (no integer-vs-level race), and `off` vs the native level `"none"` is decided by which key was used (`thinking=off` disables; `effort=none` is the level). The built value is assigned to `Conv.Gen.Reasoning`; the raw string is stored on `Target.ReasoningRaw` and the key on `Target.ReasoningKey` for display. agentrepl does **not** consult the active model's `ReasoningSpec` here and does **not** judge whether the value is native to the selected model — that judgment, and the warn-and-default, are agentkit's at request-build time (D6), which is the only place the *currently-selected* model is authoritative (a value valid for model A may be invalid for model B after a switch). A non-native value (e.g. `effort=high` set while a budget-only model is active) is therefore accepted by `Set` without error, stored, and later **warned + defaulted** by agentkit, with agentrepl relaying the `Warning` (Decision 5). The only `set`-time failures are structurally unusable inputs (an empty value for any reasoning key; a non-integer `thinking_budget`; a non-`on`/`off` `thinking`), which return `ErrBadValue`.
+  - **Display.** `Get`/`Dump` render reasoning from `Target.ReasoningRaw` under `Target.ReasoningKey` (the native key + string the operator gave), and an unset value (`ReasoningRaw == ""`) as `default` for whichever reasoning key is queried — the same uniform unset rendering every other key uses. `Dump` emits the value once, under the key it was set with; the other three reasoning keys render as `default`. **Runtime `/get`/`/dump` show only the current value (and `default` for unset); they deliberately do *not* reprint the active model's accepted-values catalog** — that discovery view is `--help`-only (Decision 12), keeping the runtime surface thin and matching the product, which mandates the catalog for `--help` alone. The native default *value* shown in `--help` comes from `spec.Default`, not from this field.
+  - **`default` resets it** to the unset `ReasoningValue` zero (model default) and clears `ReasoningRaw`/`ReasoningKey`, via the uniform unset rule above — set on *any* of the four reasoning keys it clears the one shared value; no reasoning-specific syntax.
+  - The four reasoning keys are **excluded from the generic non-native-value error coverage**: the generic error-path id asserts `ErrBadValue` for every *other* key; reasoning's "no hard error on non-native input" (only on structurally unusable input) is asserted by its own ids below.
 - Both control surfaces share this one entrypoint: the `-c` flag does `ParsePair` then `Set`; `/set <key> <value>` calls `Set` directly; `/dump` calls `Dump`. Adding a key automatically reaches both surfaces.
 
 **Rejected.**
@@ -223,15 +229,15 @@ Internally a `map[string]field`, where `field` carries `set(t, raw) error` and `
 **Verification.**
 - R-LYK7-Y7ZS — every known key coerces its value to the correct typed `Target` field (table-driven across the full key list, including pointer, int, duration, bool, enum, and string kinds).
 - R-LZS4-BZQH — an unknown key returns a wrapped `ErrUnknownKey` naming the key and mutates nothing.
-- R-M100-PRH6 — an unparseable value returns a wrapped `ErrBadValue` naming the key and reason, and mutates nothing (every key **except** `gen.reasoning`, whose non-erroring carve-out is asserted separately below).
+- R-M100-PRH6 — an unparseable value returns a wrapped `ErrBadValue` naming the key and reason, and mutates nothing (every key **except** the four reasoning keys `effort`/`thinking_level`/`thinking_budget`/`thinking`, whose non-native-value carve-out is asserted separately below).
 - R-M27X-3J7V — the `default` value resets a pointer/enum key to unset, and `Dump`/`Get` then render it as `default`.
 - R-M3FT-HAYK — `provider=` constructs via the catalog and surfaces `ErrUnknownProvider`/`ErrMissingKey` through `Set`; `model=` pre-validates against the current provider with `ErrUnknownModel`.
 - R-M4NP-V2P9 — `Dump` returns all keys sorted as `key=value` lines reflecting current state.
 - R-M5VM-8UFY — flag/runtime parity: `ParsePair`+`Set` and a direct `Set` reach identical state for the same key and value.
-- R-SCS3-DV9R — setting `zai.base_url` stores the override on `Target` and, when `zai` is (or becomes) the active provider, the constructed Z.ai provider is built with that base URL via the catalog `Options` seam — reached identically whether `zai.base_url` is set before or after `provider=zai`; `zai.base_url=default` clears it and rebuilds against the baked-in root.
-- R-FZCE-VXJL — `gen.reasoning` builds the `ReasoningValue` shape-directed and model-blind: `off`/`disable`/`disabled` → `DisableReasoning()`; a base-10 integer including negatives (`-1`, `0`, `8000`) → `Budget(n)`; any other string (`high`, `xhigh`, `none`) → `Level(verbatim)`; the result is assigned to `Conv.Gen.Reasoning` and the raw string stored on `Target.ReasoningRaw`.
-- R-G0KB-9PAA — the reasoning carve-out: a non-native or unrecognized-vocabulary `gen.reasoning` value (e.g. a level on a budget model, or a made-up level) is accepted by `Set` **without** `ErrBadValue` and stored for agentkit to warn+default at turn time; only a structurally empty value errors.
-- R-G304-18RO — `Get`/`Dump` render `gen.reasoning` from `Target.ReasoningRaw` (the native string given), and as `default` when unset; setting `gen.reasoning=default` resets `Conv.Gen.Reasoning` to the zero `ReasoningValue` and clears `ReasoningRaw`.
+- R-SCS3-DV9R — setting `base_url` stores the override on `Target` and, when `zai` is (or becomes) the active provider, the constructed Z.ai provider is built with that base URL via the catalog `Options` seam — reached identically whether `base_url` is set before or after `provider=zai`; `base_url=default` clears it and rebuilds against the baked-in root.
+- R-FZCE-VXJL — reasoning coercion is key-directed and model-blind: `effort`/`thinking_level` → `Level(verbatim)` (`high`, `xhigh`, `none`); `thinking_budget` → `Budget(n)` for a base-10 integer including negatives (`-1`, `0`, `8000`); `thinking=off` → `DisableReasoning()` and `thinking=on` → the unset zero `ReasoningValue`; in every case the result is assigned to `Conv.Gen.Reasoning` and the raw string + key stored on `Target.ReasoningRaw`/`ReasoningKey`.
+- R-G0KB-9PAA — the reasoning carve-out: a non-native value on a reasoning key (e.g. `effort=high` on a budget-only model, or a made-up level) is accepted by `Set` **without** `ErrBadValue` and stored for agentkit to warn+default at turn time; only structurally unusable input errors (empty value on any reasoning key, non-integer `thinking_budget`, non-`on`/`off` `thinking`).
+- R-G304-18RO — `Get`/`Dump` render reasoning from `Target.ReasoningRaw` under `Target.ReasoningKey` (the native key + string given), the other reasoning keys and an unset value as `default`; setting any reasoning key to `default` resets `Conv.Gen.Reasoning` to the zero `ReasoningValue` and clears `ReasoningRaw`/`ReasoningKey`.
 
 ## Decision 4 — CLI flags
 
@@ -321,7 +327,7 @@ func NewRaw(out io.Writer) Renderer
 - R-LSKZ-36TW — on a non-interrupt failed turn the driver calls `Error` (not `Usage`) and the loop continues to the next input.
 - R-G480-F0ID — after draining a turn's events, the driver calls `Renderer.Warning` once per entry in `stream.Warnings()`, before `Usage`/`Error`, and verbatim (the agentkit `Warning` is forwarded unmodified, never reclassified or suppressed); a turn with no warnings calls `Warning` zero times.
 - R-G5FW-SS92 — decorated renders a `Warning` in its own warn treatment, distinct from the `Error` treatment (golden); raw emits exactly one JSON line carrying the `Warning`'s `Setting`/`Code`/`Detail`.
-- R-G6NT-6JZR — a `gen.reasoning` value the selected model does not natively understand (the Decision 3 carve-out) produces an agentkit reasoning warning that the driver relays to the renderer, and the turn still completes with the model's default applied.
+- R-G6NT-6JZR — a reasoning value the selected model does not natively understand (set via any reasoning key — the Decision 3 carve-out) produces an agentkit reasoning warning that the driver relays to the renderer, and the turn still completes with the model's default applied.
 
 ## Decision 6 — REPL lifecycle: exit, interrupt, and log integrity
 
@@ -566,10 +572,10 @@ package repl
 
 // WriteHelp renders the static catalog: a one-line usage, the launch flags, the
 // providers list, and the models-grouped-by-provider list with each model's
-// reasoning shown as the literal `gen.reasoning=<…>` config key and accepted
-// values in traditional CLI syntax (the native term kept as a trailing
-// parenthetical). It reads only cat (no env, no constructed providers), so it
-// is credential-blind.
+// reasoning shown as its own native config key (`effort`, `thinking_budget`,
+// `thinking_level`, or `thinking`, derived from spec.Term) and accepted values
+// in traditional CLI syntax (the native term kept as a trailing parenthetical).
+// It reads only cat (no env, no constructed providers), so it is credential-blind.
 func WriteHelp(out io.Writer, name string, cat []catalog.Provider)
 ```
 
@@ -591,23 +597,23 @@ providers:
 
 models:
   anthropic
-    claude-opus-4-8     gen.reasoning={low|medium|high|xhigh|max}   (effort; default high)
-    claude-haiku-4-5    gen.reasoning=<1024–max_tokens>             (thinking budget; default off)
+    claude-opus-4-8     effort={low|medium|high|xhigh|max}         (effort; default high)
+    claude-haiku-4-5    thinking_budget=<1024–max_tokens>          (thinking budget; default off)
   google
-    gemini-2.5-flash    gen.reasoning=<0–24576>                     (thinking budget; 0=off, -1=dynamic; default dynamic)
-    gemini-3.5-flash    gen.reasoning={minimal|low|medium|high}     (thinking level; default medium)
+    gemini-2.5-flash    thinking_budget=<0–24576>                  (thinking budget; 0=off, -1=dynamic; default dynamic)
+    gemini-3.5-flash    thinking_level={minimal|low|medium|high}   (thinking level; default medium)
   openai
-    gpt-5.5             gen.reasoning={none|low|medium|high|xhigh}  (effort; default medium)
+    gpt-5.5             effort={none|low|medium|high|xhigh}        (effort; default medium)
   zai
-    glm-5.2             gen.reasoning={high|max}                    (effort; default max)
-    glm-4.7             gen.reasoning={on|off}                      (thinking; default on)
+    glm-5.2             effort={high|max}                          (effort (+ toggle); default max)
+    glm-4.7             thinking={on|off}                          (thinking; default on)
 ```
 
-- **The key, not the term, leads each row.** Every model's reasoning line is labeled with the literal config key `gen.reasoning=` — byte-identical across all models and providers — followed by its accepted values in **traditional CLI syntax**: braces `{a|b|c}` for an enumerated choice, angle brackets `<…>` for a free numeric value. A reader copies the exact `-c gen.reasoning=<value>` terminology straight off the row, the same way the `providers:`/`models:` section labels telegraph the `provider`/`model` keys. The native term (`effort`, `thinking budget`, `thinking level`, `thinking`) is retained only as parenthetical context, never as the label — removing the mismatch that made the term look like a settable key (`thinking budget:` reading as a `thinking` key).
-- **One render routine keyed on `spec.Kind`** turns a `ReasoningSpec` into its clause — the constant `gen.reasoning=` key prefix, the values group, then a trailing parenthetical carrying the native `Term`, any sentinels, and the default — no per-provider formatting:
-  - `ReasoningEnum` → `gen.reasoning={<Levels joined "|">}  (<Term>; default <level>)`.
-  - `ReasoningRange` → `gen.reasoning=<<Min>–<Max>>` then any `Sentinels` and the default in the parenthetical: `(<Term>; v=meaning, …; default <d>)`. The default is rendered from `spec.Default` in its native form (a budget int, a sentinel meaning, or `off` for a disabled default).
-  - `ReasoningToggle` → `gen.reasoning={on|off}  (<Term>; default on|off)`.
+- **The model's own native key leads each row.** Every reasoning line is labeled with the config key derived from that model's `spec.Term` — `effort`, `thinking_budget`, `thinking_level`, or `thinking` — followed by its accepted values in **traditional CLI syntax**: braces `{a|b|c}` for an enumerated choice, angle brackets `<…>` for a free numeric value. A reader copies the exact `-c <key>=<value>` terminology straight off the row, the same way the `providers:`/`models:` section labels telegraph the `provider`/`model` keys. The native term is no longer a separate-from-the-key parenthetical afterthought — it *is* the key — but the parenthetical is retained to carry the full term phrase (e.g. `effort (+ toggle)`), any sentinels, and the default.
+- **The key comes from `spec.Term`, the values group from `spec.Kind`.** A small `termToKey` normalization maps the native term to one of the four registered config keys: lowercase, drop a trailing ` (+ toggle)`, replace the space in `thinking budget`/`thinking level` with `_`. This yields exactly `effort` / `thinking_budget` / `thinking_level` / `thinking` — the same four keys Decision 3 registers — so the help can never advertise a key the config layer does not accept (golden + a cross-check id below). One render routine then turns a `ReasoningSpec` into its clause — the per-model key prefix, the values group keyed on `spec.Kind`, then a trailing parenthetical carrying the native `Term`, any sentinels, and the default — no per-provider formatting:
+  - `ReasoningEnum` → `<key>={<Levels joined "|">}  (<Term>; default <level>)`.
+  - `ReasoningRange` → `<key>=<<Min>–<Max>>` then any `Sentinels` and the default in the parenthetical: `(<Term>; v=meaning, …; default <d>)`. The default is rendered from `spec.Default` in its native form (a budget int, a sentinel meaning, or `off` for a disabled default).
+  - `ReasoningToggle` → `<key>={on|off}  (<Term>; default on|off)`.
 - **Reasoning facts come only from `p.Reasoning`** (the Decision 2 inspector). A model whose `ReasoningSpec(id)` returns `false` is rendered with a plain `(no reasoning control)` clause rather than omitted.
 - **Default value rendering reuses the same native formatter** the config display side uses (Decision 3), so `--help` and `/get` describe a model's default identically.
 - **Provider order and model grouping follow `catalog.Default()`'s stable order** — the catalog owns display order; the renderer does not sort.
@@ -618,14 +624,16 @@ models:
 - **Sourcing reasoning from a constructed provider / `SupportedReasoning()` on a handle** — would need a key just to print static metadata; the credential-blind package-level inspector exists precisely to avoid this.
 - **Per-provider format branches** — reintroduces the provider knowledge the thin-consumer principle forbids; a single `Kind`-keyed routine renders all three shapes.
 - **Hardcoding the reasoning text in agentrepl** — drifts from agentkit the moment a model's vocabulary changes; reading `ReasoningSpec` at print time keeps display and acceptance from one source.
-- **Labeling the row with the native term** (`effort:`, `thinking budget:`) — the term coincides with no config key, so a reader types `-c thinking=12000` and gets `unknown config key`; the row must carry the actual key.
-- **A single header line naming the key once** (`models:  (set with -c gen.reasoning=<value>)`) — forces the reader to assemble the key from a distant header and the values from the row; each row should be independently copy-pasteable.
+- **A single generic `gen.reasoning` key for every model** (the prior design) — a synthetic common interface over a setting that is natively per-model; removed in favor of passthrough native keys. The `gen.`/`retry.`/`zai.` prefixes went with it: they never routed anything (`Set` is one flat `map[string]field` lookup), so they were pure decoration.
+- **A single header line naming the key once** (`models:  (set with -c <key>=<value>)`) — forces the reader to assemble the key from a distant header and the values from the row; each row should be independently copy-pasteable, carrying its own native key.
+- **A `termToKey` that keys on `spec.Kind` instead of `spec.Term`** — `Kind=Enum` is shared by `effort` (Anthropic/OpenAI/Z.ai) and `thinking_level` (Gemini), so the kind alone cannot pick the key; the native term is the only unambiguous source.
 
 **Verification.**
 - R-FT8W-Z2U4 — `-h`/`-help` writes the catalog to `out` and exits `0` without starting the REPL loop, and does so with **no** environment variables set and **no** provider constructed (credential-blind).
 - R-FUGT-CUKT — the catalog lists every provider from `catalog.Default()` and, grouped under each, every curated model id, in `Default()`'s order.
 - R-FVOP-QMBI — each model's accepted-values group is rendered from its `ReasoningSpec` by `Kind`: an enum model shows its `Levels`, a range model shows `Min`–`Max` plus sentinel meanings, a toggle model shows `on`/`off`; each carries its native default and the native `Term` in the trailing parenthetical (golden-pinned across all three kinds).
-- R-6DEO-9TXQ — every model row leads with the literal config key `gen.reasoning=` (byte-identical across all models and providers) followed by its values in traditional CLI syntax — `{a|b|c}` for enum/toggle, `<…>` for a range — so the row is copy-pasteable as `-c gen.reasoning=<value>`; the native term appears only in the parenthetical, never as the label.
+- R-6DEO-9TXQ — every model row leads with that model's native reasoning key (`effort`/`thinking_budget`/`thinking_level`/`thinking`, derived from `spec.Term`) followed by its values in traditional CLI syntax — `{a|b|c}` for enum/toggle, `<…>` for a range — so the row is copy-pasteable as `-c <key>=<value>`; the native term phrase, sentinels, and default appear in the parenthetical.
+- R-6DEO-KEYS — `termToKey(spec.Term)` for every supported model resolves to one of the four reasoning keys Decision 3 registers (`effort`/`thinking_budget`/`thinking_level`/`thinking`), so the catalog never prints a key the config layer would reject as unknown.
 - R-FWWM-4E27 — a model whose inspector returns `ReasoningSpec(id) == (_, false)` renders a `(no reasoning control)` clause and is not dropped from the listing.
 - R-FY4I-I5SW — `WriteHelp` performs no env read and constructs no provider (asserted by passing a catalog whose `New`/`Getenv` would record or panic if called), proving the help path cannot depend on credentials.
 
