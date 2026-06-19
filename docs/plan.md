@@ -170,7 +170,7 @@ Flatten `internal/config` so every key is a flat, unprefixed name: drop the `gen
 
 **Done when:** the Decision 3 ids are re-covered against the flat keys — R-LYK7-Y7ZS, R-M100-PRH6, R-M27X-3J7V, R-M3FT-HAYK, R-M4NP-V2P9, R-M5VM-8UFY, R-LZS4-BZQH, R-SCS3-DV9R (now `base_url`), R-FZCE-VXJL (key-directed coercion across all four keys), R-G0KB-9PAA (carve-out: non-native accepted, only structurally unusable errors), and R-G304-18RO (`Get`/`Dump` under `ReasoningKey`; `default` clears value+key) — are each covered by a clearly-named test and the suite is green.
 
-### Phase 17 — `--help` rows lead with each model's native reasoning key · ⬜ not started
+### Phase 17 — `--help` rows lead with each model's native reasoning key · ✅ done
 
 *Realizes design Decision 12 (amended: each row leads with the model's own native key derived from `spec.Term` via `termToKey`, replacing the constant `gen.reasoning=`). Depends on Phase 16 (the four registered keys) and Phase 15 (`WriteHelp` and its golden).*
 

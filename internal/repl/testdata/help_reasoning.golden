@@ -12,8 +12,8 @@ providers:
 
 models:
   enum
-    enum-model               gen.reasoning={low|high}  (effort; default high)
+    enum-model               effort={low|high}  (effort; default high)
   range
-    range-model              gen.reasoning=<0–24576>  (thinking budget; 0=off, -1=dynamic; default dynamic)
+    range-model              thinking_budget=<0–24576>  (thinking budget; 0=off, -1=dynamic; default dynamic)
   toggle
-    toggle-model             gen.reasoning={on|off}  (thinking; default on)
+    toggle-model             thinking={on|off}  (thinking; default on)

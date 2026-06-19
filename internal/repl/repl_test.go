@@ -92,7 +92,7 @@ func TestParseArgsHelpWritesCatalogAndReturnsErrHelpCredentialBlind(t *testing.T
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("ParseArgs(-h) error = %v, want flag.ErrHelp", err)
 	}
-	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)", "test-model", "gen.reasoning={low|high}  (effort; default high)"} {
+	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)", "test-model", "effort={low|high}  (effort; default high)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("help output = %q, want %q", out.String(), want)
 		}
@@ -182,6 +182,31 @@ func TestWriteHelpGoldenReasoningClausesByKind(t *testing.T) {
 	}
 	if out.String() != string(want) {
 		t.Fatalf("help output mismatch\nwant:\n%s\ngot:\n%s", want, out.String())
+	}
+}
+
+func TestWriteHelpReasoningTermsMapToRegisteredConfigKeys(t *testing.T) {
+	// R-6DEO-KEYS
+	keys := map[string]bool{}
+	for _, key := range config.Keys() {
+		keys[key] = true
+	}
+	for _, provider := range catalog.Default() {
+		for _, model := range provider.Models {
+			spec, ok := provider.Reasoning.ReasoningSpec(model)
+			if !ok {
+				continue
+			}
+			key := termToKey(spec.Term)
+			if !keys[key] {
+				t.Fatalf("%s %s termToKey(%q) = %q, want registered config key", provider.Name, model, spec.Term, key)
+			}
+			switch key {
+			case "effort", "thinking_budget", "thinking_level", "thinking":
+			default:
+				t.Fatalf("%s %s termToKey(%q) = %q, want native reasoning key", provider.Name, model, spec.Term, key)
+			}
+		}
 	}
 }
 
