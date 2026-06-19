@@ -27,7 +27,7 @@ agentrepl covers, for v1:
 - **Provider/model switching mid-conversation**, with prior history carried over.
 - **Streaming replies**, with the model's incremental text and reasoning visible as they arrive.
 - **Full visibility of the exchange**: the user's prompts, the model's replies and reasoning, every tool-call request with its arguments, and every tool result fed back.
-- **Token-usage and dollar-cost reporting**, per turn and cumulatively, surfaced from agentkit.
+- **Token-usage and dollar-cost reporting** surfaced from agentkit, at a cadence that depends on the rendering: in the decorated view, cumulatively — on demand and automatically when the session ends; in the raw view, per turn.
 - **Two rendering formats** for what the operator sees: a decorated human-readable transcript and a raw, undecorated stream of the underlying messages.
 - **An always-on session log**: every run records its complete raw exchange to a per-session file for after-the-fact inspection.
 - **Credentials sourced only from the environment**, one conventional variable per provider; agentrepl reads no credential files itself.
@@ -54,6 +54,8 @@ These fixed, promised values the design must use verbatim and never re-declare:
 
 - **Launch into a conversation, immediately.** Running agentrepl with a provider and model selected drops the operator into an interactive prompt where they type a message and get a streamed reply. Initial settings come from flags; nothing else is required to start talking.
 
+- **Type at a prompt; your input is not parroted back.** In an interactive terminal, agentrepl shows a `you ›` prompt before every input and waits there; the operator types their message or a slash-command at that prompt, and what they typed is not repeated back as a separate transcript line — the reply (or command output) follows directly beneath what they entered. When the output is not an interactive terminal, no prompt is drawn and the input is not echoed in the decorated view; the session log and the raw view remain the complete record of what was sent.
+
 - **Every agentkit knob is reachable, from one config vocabulary.** agentkit's conversation settings are set at launch through a repeatable `key=value` flag and adjusted at runtime through the matching slash-command, using the same flat keys. For example, `-c temperature=0.7` at launch and a `/set temperature 0.7` at runtime mean the same thing, and the operator can dump the current configuration on demand. A bad key or unusable value is reported clearly rather than silently ignored.
 
 - **Pick any provider whose key is present; switch between them mid-conversation.** The operator selects Anthropic, Google (Gemini), OpenAI, or Z.ai and a model from agentkit's curated set, and can change that selection between turns with the conversation continuing coherently. A provider whose environment key is absent cannot be selected, and saying so is a clear message, not a crash.
@@ -70,11 +72,11 @@ These fixed, promised values the design must use verbatim and never re-declare:
 
 - **Tools work, driven automatically.** The four built-in tools (`bash`, `read`, `write`, `edit`), rooted at the working directory, are offered to the model; when the model calls one, agentkit runs it and feeds the result back, looping until a final answer — with each step visible. This demonstrates, hands-on, that a consumer can supply tools and that the tool loop runs.
 
-- **Spend is always in view.** After each turn the operator sees that turn's token usage and dollar cost, and the running cumulative cost for the session, drawn from agentkit's built-in pricing. The cumulative spend can be requested on demand at any point, and is shown automatically when the session ends.
+- **Spend on demand and at exit, not underfoot.** In the decorated view, agentrepl does not interrupt each turn with a usage/cost report; instead the operator asks for the session's cumulative token usage and dollar cost whenever they want it, and it is also shown automatically when the session ends — both drawn from agentkit's built-in pricing. (The raw view continues to emit per-turn usage for machine inspection.)
 
 - **Stop cleanly, on command or on interrupt.** The operator can end the session with a runtime command, or press Ctrl-C to stop immediately — including mid-reply. Either way the stop is prompt, the session log is left intact (never truncated or corrupted by the interruption), and the cumulative spend is reported as the session closes.
 
-- **Choose how the exchange is rendered.** A decorated, human-readable transcript (the default) presents each part of the exchange — prompt, reply, reasoning, tool calls, tool results, and the per-turn usage/cost line — with a distinct visual treatment per kind, using color only when writing to a terminal. A raw mode instead emits the underlying messages verbatim, one per entry, undecorated, for inspecting exactly what agentkit produces. The rendering choice does not change what the session log records.
+- **Choose how the exchange is rendered.** A decorated, human-readable transcript (the default) presents the model's reply, reasoning, tool calls, and tool results — each with a distinct visual treatment per kind, using color only when writing to a terminal; it does not re-render the operator's input as a transcript line and does not print a per-turn usage/cost report. A raw mode instead emits the underlying messages verbatim, one per entry, undecorated — including the operator's prompt and the per-turn usage entries — for inspecting exactly what agentkit produces. The rendering choice does not change what the session log records.
 
 - **Every session is recorded for forensics.** Each run writes its complete raw exchange to `~/.agentkit/<session-id>.jsonl` as it happens, independent of the chosen rendering. When something looks wrong during interactive use, the operator (or an agent acting for them) can read that file to see the exact conversation. agentrepl never reads it back to resume.
 
@@ -95,9 +97,10 @@ The verification gate runs the built agentrepl against exactly this list:
 - Replies are delivered incrementally, and when a model emits reasoning it is visible as the turn unfolds.
 - For a turn that uses tools, the operator can observe the model's tool-call request(s) with arguments and the tool result(s) fed back, and the loop completes to a final answer.
 - Each of the four built-in tools — `bash`, `read`, `write`, `edit` — can be invoked by the model and operates relative to agentrepl's current working directory.
-- After each turn the operator sees that turn's token usage and dollar cost, and a running cumulative cost for the session; the cumulative spend can also be requested on demand and is shown automatically when the session ends.
+- In the decorated view, no automatic per-turn usage/cost report appears; the session's cumulative token usage and dollar cost can be requested on demand and are shown automatically when the session ends. In the raw view, per-turn usage continues to be emitted.
+- In an interactive terminal, a `you ›` prompt is shown before every input and what the operator typed is not echoed back as a separate transcript line; when the output is not an interactive terminal, neither the prompt nor the echoed input appears in the decorated view.
 - The operator can end the session with a runtime command or with Ctrl-C; Ctrl-C stops promptly even mid-reply, the session log remains a complete, uncorrupted record of what occurred, and the cumulative spend is reported as the session closes.
-- The default rendering shows a decorated transcript distinguishing prompt, reply, reasoning, tool calls, tool results, and the per-turn usage/cost line, with color only when output is a terminal; the raw rendering emits the underlying messages verbatim, one per entry, undecorated.
+- The default decorated rendering distinguishes reply, reasoning, tool calls, and tool results, with color only when output is a terminal, and it neither re-renders the operator's input nor prints a per-turn usage/cost report; the raw rendering emits the underlying messages verbatim, one per entry, undecorated, including the operator's prompt and the per-turn usage entries.
 - Every run writes its complete raw exchange to `~/.agentkit/<session-id>.jsonl` regardless of the chosen rendering, and that file reflects the conversation that occurred.
 - Clearing in-session history via the runtime command starts a fresh conversation within the same process; agentrepl never resumes a prior session from disk.
 - When agentkit returns an error, agentrepl surfaces it visibly and the REPL remains usable for the next input.

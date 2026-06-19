@@ -56,6 +56,7 @@ Seams — each a substitution point for tests:
 | **Engine** | the real `*agentkit.Conversation` with a fake `agentkit.Provider` | fake provider yields deterministic events — mirrors agentkit's own tests |
 | **Renderer** | `interface` with `decorated` and `raw` impls, selected at runtime | the one place a runtime interface is warranted (polymorphic dispatch) |
 | **Log** | an `io.Writer` assigned to `Conversation.Log` | tests pass a `bytes.Buffer` and assert JSONL |
+| **Waiter** | `interface { Start(model string); Stop() }` — the wait status line (Decision 13); live driver (goroutine+clock) bound only on a TTY, else `nopWaiter` | tests inject a recording fake or the `nopWaiter`; the line's text is a pure, table-tested formatter |
 
 Idiomatic-Go consequences baked into this skeleton:
 
@@ -288,30 +289,37 @@ Provider and model are **not** their own flags — they are `-c provider=… -c 
 ```go
 package render
 
-// Renderer presents one turn's prompt, streamed events, outcome, and spend.
+// Renderer presents the input prompt, streamed events, outcome, and spend.
 type Renderer interface {
-    Prompt(text string)                                          // the user's message
+    Prompt()                                                     // draw the input prompt before a read (decorated+TTY: "you › "; raw/non-TTY: no-op)
+    Input(text string)                                           // the operator's entered turn message (raw records it; decorated does not echo it)
     Event(ev agentkit.Event)                                     // each streamed event, in order
-    Usage(turn agentkit.Usage, turnCost, total agentkit.Cost)    // per-turn usage/cost line
+    Usage(turn agentkit.Usage, turnCost, total agentkit.Cost)    // per-turn usage/cost line (raw only; decorated no-op)
     Summary(total agentkit.Usage, totalCost agentkit.Cost)       // cumulative usage+cost block (/usage, on exit)
     Warning(w agentkit.Warning)                                  // a setting agentkit could not honor as asked
     Error(err error)                                             // a failed turn or command
     Notice(line string)                                          // agentrepl info (e.g. /dump, hints)
 }
 
-func NewDecorated(out io.Writer, color bool) Renderer
+func NewDecorated(out io.Writer, color, tty bool) Renderer
 func NewRaw(out io.Writer) Renderer
 ```
 
-**Turn driver** (`repl`): pre-check provider+model → `Prompt(text)` → `stream := conv.Send(ctx, text)` → range `stream.Events()` calling `Event(ev)` for each → after draining, if `ctx.Err() != nil` render an interrupt notice and exit (Decision 6); otherwise **relay any settings warnings first** — `for _, w := range stream.Warnings() { Warning(w) }` — then, if `stream.Err() != nil` call `Error(err)`, else call `Usage(stream.Usage(), stream.Cost(), conv.TotalCost())`. Warnings are rendered whether the turn then succeeds or errors, because they describe a setting that was not honored (most often reasoning: a non-native value carried in via the Decision 3 carve-out, which agentkit warned-and-defaulted), independent of turn outcome. The `ctx` passed to `Send` is the SIGINT-cancellable context from Decision 6; the loop survives any non-interrupt turn error.
+`Prompt()` and `Input(text)` split what was one `Prompt(text)` method into the two jobs it conflated: drawing the input affordance (before a read, no text, terminal-only) and recording the entered message (after a read, raw's forensic stream). The decorated view never echoes the operator's input — the terminal already shows what was typed at the prompt; raw never draws an affordance — it has no interactive surface. The decorated renderer is constructed with both `color` and `tty`: `tty` gates whether the `you ›` prompt is drawn at all (an interactive terminal echoes typed input so the line reads `you › hi`), independent of `color`, which only gates ANSI (so `NO_COLOR=1` in a terminal still gets an uncolored prompt). `/render` reconstructs from `state.io.IsTTY`.
+
+**Input affordance is loop-owned, not driver-owned.** The `Run` loop (Decision 9) calls `Renderer.Prompt()` *before* awaiting each input line — so the `you ›` prompt precedes **every** read uniformly: a turn message, a `/command`, or an empty line. The prompt is the renderer's, not the driver's; the driver no longer draws it.
+
+**Turn driver** (`repl`): pre-check provider+model → `Input(text)` (records the message; raw-only effect) → `waiter.Start(conv.Model)` (decorated+TTY only — the wait status line, Decision 13; `nopWaiter` otherwise) → `stream := conv.Send(ctx, text)` → range `stream.Events()` calling `Event(ev)` for each, with `waiter.Stop()` on the first event and again via `defer` so every exit (success, error, empty, interrupt) erases the line → after draining, if `ctx.Err() != nil` render an interrupt notice and exit (Decision 6); otherwise **relay any settings warnings first** — `for _, w := range stream.Warnings() { Warning(w) }` — then, if `stream.Err() != nil` call `Error(err)`, else call `Usage(stream.Usage(), stream.Cost(), conv.TotalCost())`. The driver calls `Usage` uniformly; the decorated renderer no-ops it (per-turn spend is raw-only — Decision 7), so the difference lives in the renderer, not the driver. Warnings are rendered whether the turn then succeeds or errors, because they describe a setting that was not honored (most often reasoning: a non-native value carried in via the Decision 3 carve-out, which agentkit warned-and-defaulted), independent of turn outcome. The `ctx` passed to `Send` is the SIGINT-cancellable context from Decision 6; the loop survives any non-interrupt turn error.
 
 **Warning relay is render-only.** agentrepl never mints, classifies, or suppresses a warning — it forwards each `agentkit.Warning` verbatim to the renderer. A `Warning` is **not** an `Error` (the turn was issued and, for the reasoning case, succeeds with the model's default); it gets its own kind so its treatment and placement (before the usage line) are distinct.
 
-**decorated** (default): a distinct visual treatment per kind — `Prompt` ("you ›"), `TextDelta` streamed inline as the reply, `ReasoningDelta` dim/streamed, `ToolUse` labeled with name + arguments, `ToolResult` (error treatment when `IsError`), `Warning` in a distinct warn style (e.g. `⚠ <Setting>: <Detail>`, separate from the error style), and a usage/cost line; `MessageDone` flushes a separator between messages in a tool loop. Exact glyphs/labels/ANSI codes are pinned by golden files under `testdata/`.
+**decorated** (default): a distinct visual treatment per kind — `Prompt()` draws the `you ›` input prompt (**bold**, default foreground — the terminal's own white; ANSI emitted only when `color`; no trailing newline, so the terminal's own echo of typed input completes the line, and that echoed input keeps the default foreground too) **only when `tty`**, and draws nothing otherwise; `Input(text)` is a **no-op** (the entered text is never re-rendered — the terminal already showed it); `TextDelta` streamed inline as the reply, with the `assistant ›` label **bold + light blue** (ANSI bright-blue) and the streamed reply text the **same light blue but not bold** (the hue carries the whole reply; only the label is bold); `ReasoningDelta` dim/streamed; `ToolUse` and a **successful** `ToolResult` each rendered as a **subdued gray** line (ANSI bright-black), label and body alike; a `ToolResult` with `IsError` instead keeps the **red** error treatment so a failing tool stands out rather than blending into the gray; `Warning` in a distinct warn style (e.g. `⚠ <Setting>: <Detail>`, separate from the error style); `Usage(...)` is a **no-op** (per-turn spend is raw-only — Decision 7). `MessageDone` flushes the streamed line with a newline but prints **no separator rule** between messages — the prior `─` turn/message separator is removed. Exact glyphs/labels/ANSI codes are pinned by golden files under `testdata/`.
 
-**raw**: emits **one undecorated JSON line per committed entry** — `Prompt`, `MessageDone`, `ToolUse`, `ToolResult` — plus the usage line as JSON and **one JSON line per `Warning`** (the `agentkit.Warning` struct marshaled verbatim, carrying `Setting`/`Code`/`Detail`); **skips `TextDelta`/`ReasoningDelta`** (streaming fragments, not entries — and `MessageDone.Message` already carries the fully assembled text/reasoning blocks). Never emits ANSI. Marshals with `encoding/json`, yielding block shapes consistent with agentkit's own log (agentkit does no custom marshaling).
+**Vertical spacing — one blank line between consecutive blocks, as a leading separator.** The decorated view separates every adjacent pair of transcript blocks (the `you ›` prompt, an `assistant ›` reply, `reasoning ›`, `tool call ›`, `tool result ›`, a notice, a warning, an error, the summary) with exactly **one blank line**, for a uniform vertical rhythm. The blank is emitted as a **leading** separator: a single newline written at the *start* of each block, suppressed until the first block of the session has been drawn — so the session opens with no leading blank and closes with no trailing blank after the final summary, while the blank the operator perceives "after the `you ›` line" is the leading separator of the block that follows it. The `you ›` prompt therefore never owns a trailing newline (the terminal's echo of the typed line completes it); whatever block comes next — a reply, a tool call, or a command's notice — supplies the separator, so turns, `/commands`, and notices space identically. A **bare empty line** at the prompt (ignored per Decision 9) produces **no** extra blank: the separator appears only between actual blocks, never between two consecutive prompts. To keep the single-blank rule exact regardless of tool output, the `tool call ›` / `tool result ›` emitters **trim a single trailing newline** from the rendered input/output, so a tool whose output ends in `\n` still yields exactly one blank, not two.
 
-**color**: the composition root computes `color = IO.IsTTY && Getenv("NO_COLOR") == ""` and passes it to `NewDecorated`. Raw is always colorless.
+**raw**: emits **one undecorated JSON line per committed entry** — the prompt entry from `Input(text)` (`{"type":"prompt","text":…}`), `MessageDone`, `ToolUse`, `ToolResult` — plus the per-turn usage line as JSON and **one JSON line per `Warning`** (the `agentkit.Warning` struct marshaled verbatim, carrying `Setting`/`Code`/`Detail`); `Prompt()` is a **no-op** (no interactive affordance in raw), and it **skips `TextDelta`/`ReasoningDelta`** (streaming fragments, not entries — and `MessageDone.Message` already carries the fully assembled text/reasoning blocks). Raw is unchanged by this revision: it still records the prompt text and the per-turn usage. Never emits ANSI. Marshals with `encoding/json`, yielding block shapes consistent with agentkit's own log (agentkit does no custom marshaling).
+
+**color**: the composition root computes `color = IO.IsTTY && Getenv("NO_COLOR") == ""` and passes it **plus `IO.IsTTY`** to `NewDecorated(out, color, tty)`. The prompt is drawn when `tty` (an interactive terminal); ANSI is emitted when `color`. Raw is always colorless and draws no prompt.
 
 **Rejected.**
 - **Raw = tee agentkit's `Conversation.Log` (LogRecord stream) to stdout** — byte-identical to the forensic file, but it makes `rawRenderer` a no-op while output sneaks in via a `MultiWriter`, turning the two-impl seam into a fiction and coupling raw render to the log. Marshaling events keeps both renderers honest and the log independent.
@@ -319,10 +327,14 @@ func NewRaw(out io.Writer) Renderer
 - **A `Renderer` per event-kind / a visitor** — overwrought; a small sealed-union `switch` inside each impl is the idiomatic Go shape.
 
 **Verification.**
-- R-LL9K-SKDQ — decorated renders each kind (prompt, reply text, reasoning, tool-call, tool-result, usage line) with a distinct treatment (golden).
+- R-LL9K-SKDQ — decorated renders each transcript kind (reply text, reasoning, tool-call, tool-result) with a distinct treatment, and prints **no** `─` separator rule between messages (golden).
+- R-Q52T-PXCR — decorated separates every adjacent pair of transcript blocks with exactly one blank line (leading separator): a multi-block transcript (`you ›` → reply → tool call → tool result → reply) shows one blank line between each pair, no leading blank before the first block, no trailing blank after the summary, a tool result whose output ends in `\n` still yields exactly one blank, and a bare empty line at the prompt adds no blank (golden).
+- R-JFBW-TYU8 — the loop calls `Renderer.Prompt()` before every input read (turn, command, and empty line alike); in decorated mode `Prompt()` writes the `you ›` prompt (no trailing newline) when `tty` and writes nothing when not a `tty`, and `Input(text)` never echoes the entered text back as a transcript line (golden for the tty/non-tty decorated output; repl-level assertion that the prompt precedes each read).
+- R-JGJT-7QKX — in decorated mode `Usage(...)` prints nothing (per-turn spend suppressed); the same driver call in raw mode emits the per-turn usage line.
 - R-LMHH-6C4F — decorated streams `TextDelta`/`ReasoningDelta` incrementally: bytes are written as each delta arrives, not buffered to end of turn.
 - R-LNPD-K3V4 — decorated emits ANSI color when `color` is true and none when it is false (golden for both).
-- R-LOX9-XVLT — raw emits exactly one undecorated JSON line per `Prompt`/`MessageDone`/`ToolUse`/`ToolResult` plus a usage line, skipping deltas; the output is valid JSONL with no ANSI.
+- R-OBNM-N6XX — decorated applies the fixed palette (golden): the `you ›` prompt and its echoed input are bold/default-foreground (no hue); the `assistant ›` label is bold + light blue and the streamed reply text is the same light blue but not bold; `tool call ›` and a successful `tool result ›` line are subdued gray (label and body); a `tool result ›` with `IsError` is rendered in the red error treatment; `reasoning ›` is dim.
+- R-LOX9-XVLT — raw emits exactly one undecorated JSON line for the prompt entry (from `Input`), and one per `MessageDone`/`ToolUse`/`ToolResult`, plus a per-turn usage line, skipping deltas and emitting nothing for `Prompt()`; the output is valid JSONL with no ANSI.
 - R-LRD2-PF37 — a `ToolResult` with `IsError` gets the error treatment in decorated and preserves `IsError` in raw.
 - R-LSKZ-36TW — on a non-interrupt failed turn the driver calls `Error` (not `Usage`) and the loop continues to the next input.
 - R-G480-F0ID — after draining a turn's events, the driver calls `Renderer.Warning` once per entry in `stream.Warnings()`, before `Usage`/`Error`, and verbatim (the agentkit `Warning` is forwarded unmodified, never reclassified or suppressed); a turn with no warnings calls `Warning` zero times.
@@ -367,16 +379,16 @@ Ctrl-C semantic: **immediate graceful exit** (a turn in flight is aborted and th
 
 ## Decision 7 — Usage & cost reporting
 
-**Decision.** All spend numbers come straight from agentkit — agentrepl formats, never recomputes (the product: "surfaced from agentkit / drawn from agentkit's built-in pricing"). Because agentrepl exists to *verify* agentkit, the decorated per-turn line shows the **full token-bucket breakdown**, not just a total.
+**Decision.** All spend numbers come straight from agentkit — agentrepl formats, never recomputes (the product: "surfaced from agentkit / drawn from agentkit's built-in pricing"). The cadence differs by renderer: the **decorated** view shows spend only as a **cumulative** summary (on `/usage` and at exit) — never a per-turn line; the **raw** view emits a per-turn usage line on every turn (its forensic, verbatim role). Because agentrepl exists to *verify* agentkit, both the per-turn line (raw) and the cumulative summary (both renderers) show the **full token-bucket breakdown**, not just a total.
 
-Per-turn line (`Renderer.Usage(turn, turnCost, total)`), from `stream.Usage()`, `stream.Cost()`, `conv.TotalCost()`:
+Per-turn line (`Renderer.Usage(turn, turnCost, total)`), from `stream.Usage()`, `stream.Cost()`, `conv.TotalCost()` — **rendered by raw only**; the decorated renderer no-ops this call (Decision 5):
 
 ```
 · tokens  in=123 cache(r=10 w=5) out=456 reasoning=78 total=657
 · cost     $0.001234 turn   $0.005678 session
 ```
 
-Cumulative summary (`Renderer.Summary(total, totalCost)`), from `conv.TotalUsage()`, `conv.TotalCost()` — the cumulative token breakdown plus session cost.
+Cumulative summary (`Renderer.Summary(total, totalCost)`), from `conv.TotalUsage()`, `conv.TotalCost()` — the cumulative token breakdown plus session cost. This is the **only** spend the decorated view prints, and it carries the same bucket layout shown above.
 
 - Buckets shown: `InputUncached`, `CacheReadInput`, `CacheWriteInput`, `Output`, `ReasoningOutput`, `Total` — exactly the `Usage` fields, verbatim.
 - Cost via `Cost.USD()`, formatted to micro-dollar resolution (6 decimals); per-turn costs are small.
@@ -394,8 +406,8 @@ Cumulative summary (`Renderer.Summary(total, totalCost)`), from `conv.TotalUsage
 - **agentrepl maintains its own cumulative sum** — `conv.TotalUsage()/TotalCost()` already exist and correctly exclude failed turns; a parallel sum would risk disagreeing.
 
 **Verification.**
-- R-ONJY-6PJG — the per-turn line reports the turn's token buckets and total exactly as `stream.Usage()` reports them (no recomputation).
-- R-OORU-KHA5 — the per-turn line reports turn cost from `stream.Cost()` and session cost from `conv.TotalCost()`, both in USD.
+- R-ONJY-6PJG — the raw per-turn line reports the turn's token buckets and total exactly as `stream.Usage()` reports them (no recomputation).
+- R-OORU-KHA5 — the raw per-turn line reports turn cost from `stream.Cost()` and session cost from `conv.TotalCost()`, both in USD.
 - R-OPZQ-Y90U — after a turn that errored or was interrupted, the displayed session cumulative is unchanged from before it (success-only accounting).
 - R-OR7N-C0RJ — raw mode emits the per-turn usage as a JSON object carrying the `Usage` buckets and the turn/session costs.
 - R-OSFJ-PSI8 — `/usage` renders the cumulative summary (`TotalUsage` buckets + `TotalCost`), sourced from agentkit.
@@ -435,7 +447,7 @@ func Open(dir string, now time.Time) (*os.File, string, error)
 
 ## Decision 9 — Slash-command dispatch & the command set
 
-**Decision.** `internal/repl` owns the loop and a small **command table** (`map[string]command` with handler + help text, which also generates `/help`). A line starting with `/` is a command; any other non-empty line is a turn message; an empty line is ignored.
+**Decision.** `internal/repl` owns the loop and a small **command table** (`map[string]command` with handler + help text, which also generates `/help`). The loop calls `Renderer.Prompt()` **before awaiting each input line**, so the `you ›` affordance precedes every read uniformly (decorated+TTY draws it; raw and non-TTY draw nothing — Decision 5). A line starting with `/` is a command; any other non-empty line is a turn message; an empty line is ignored. `/render` reconstructs the renderer from `state.io.Out`, `state.color`, and `state.io.IsTTY` so a swapped-in decorated renderer keeps the same prompt/color gating.
 
 ```go
 type command struct {
@@ -637,8 +649,55 @@ models:
 - R-FWWM-4E27 — a model whose inspector returns `ReasoningSpec(id) == (_, false)` renders a `(no reasoning control)` clause and is not dropped from the listing.
 - R-FY4I-I5SW — `WriteHelp` performs no env read and constructs no provider (asserted by passing a catalog whose `New`/`Getenv` would record or panic if called), proving the help path cannot depend on credentials.
 
+## Decision 13 — Wait status line (`waiting for <model>`)
+
+**Decision.** While a turn is in flight and the model has not yet produced output, the decorated view paints a single ephemeral status line — `waiting for <model> (<elapsed>)` — repainted in place and erased the instant the turn produces anything. It is modeled on ralph's wait spinner, **without the spinner glyph**: only the elapsed seconds change. The animator is the **one impure seam** (goroutine + ticker + real wall clock + terminal erase writes); everything it draws comes from a pure, table-tested formatter.
+
+```go
+package repl
+
+// Waiter shows an ephemeral "waiting for <model> (<elapsed>)" status while a
+// turn is in flight, then erases it. Injected via Deps; the live driver is bound
+// only when stdout is an interactive TTY, a nopWaiter otherwise (and in tests).
+type Waiter interface {
+    Start(model string) // begin the wait; first paint only after the pre-roll
+    Stop()              // halt the painter and erase any line it drew; idempotent
+}
+```
+
+```go
+package render
+
+// waitLine builds one paint of the status line: "waiting for <model> (<elapsed>)",
+// dim-gray-wrapped when color, plain otherwise. No erase prefix, no trailing
+// newline — the live driver prepends "\r\x1b[2K" per repaint. Pure → table test.
+func waitLine(model string, elapsed time.Duration, color bool) string
+
+// formatElapsed renders a duration compactly with h/m/s rollover, truncated to
+// whole seconds, higher-order zero units omitted: 5s, 2m17s, 1h2m3s. Pure → table test.
+func formatElapsed(d time.Duration) string
+```
+
+- **Pure core, impure driver.** `waitLine` + `formatElapsed` carry the text and the rollover and are table-tested with no clock or IO. The live driver (`liveWaiter`) owns the goroutine, the `time.Ticker`, the real `time.Now`, and the `\r\x1b[2K` erase writes — it is the documented exception to the Conventions "no `time.Now` outside the composition root" rule, constructed in the composition root and never reached by a golden test. A `nopWaiter` (both methods empty) is the default everywhere else.
+- **Cadence & pre-roll.** A **2s pre-roll** of silence precedes the first paint, so a turn that finishes quickly never shows the line (and `Stop` then erases nothing). After the pre-roll the line repaints every **80ms** — fast enough that the elapsed counter never visibly jumps when its width changes (`9s`→`10s`, `59s`→`1m0s`) and the line never reads as choppy, even though only the seconds move.
+- **Stream, color, and TTY gating.** The line is written to the decorated renderer's **stdout** (`IO.Out`), in **subdued gray** (ANSI bright-black) when `color`, matching the tool-line register (Decision 5). The live driver is bound **only when `IO.IsTTY`**; non-TTY and raw runs get `nopWaiter`, so machine-readable output never receives a status line. The model name is `conv.Model` at send time.
+- **Driver wiring (Decision 5).** The turn driver calls `waiter.Start(conv.Model)` immediately before ranging the stream and `waiter.Stop()` both on the first event drawn and via `defer` (so an errored, empty, or interrupted turn still erases). The waiter runs **only while the decorated renderer is active** — a turn taken after `/render raw` uses the nop, mirroring how `Prompt()` is a no-op in raw.
+- **Spacing interaction (Decision 5).** `Stop`'s erase is `\r\x1b[2K`, leaving the cursor at the start of a cleared line; the following block's *leading* separator then writes its single `\n`, so exactly one blank line stands between `you ›` and the reply — identical whether the status line painted or the turn finished inside the pre-roll (in which case nothing was drawn and nothing is erased). The status line never perturbs the one-blank rule.
+
+**Rejected.**
+- **Keep the spinner glyph** — the operator asked for a glyph-free line; the elapsed counter alone signals liveness.
+- **`Start`/`Stop` as `Renderer` methods** — puts an impure goroutine and a real clock inside the golden-tested renderer; ralph deliberately keeps the animator out of the renderer, and so does this — the renderer stays pure-ish and golden-driven while the one untestable seam is isolated.
+- **1s repaint cadence** — the seconds would tick correctly but the line redraws coarsely and its width-change (`9s`→`10s`) reads as a visible jump; 80ms keeps it smooth for negligible cost (it only paints on a TTY, after a 2s pre-roll, and stops on first output).
+- **No pre-roll (paint immediately)** — flashes a status line on every fast turn; the 2s quiet period suppresses it for turns that never needed it.
+- **Write to stderr** (ralph's choice) — agentrepl's decorated transcript lives on stdout and the line is TTY-only and erased, so co-locating it on stdout keeps it within the renderer's stream without leaking into any capture (no capture happens on a TTY).
+
+**Verification.**
+- R-6DZ8-F5IK — `waitLine`/`formatElapsed` are pure and table-tested: `waitLine` yields `waiting for <model> (<elapsed>)`, gray-wrapped when `color` and plain otherwise (no erase prefix, no trailing newline); `formatElapsed` renders `5s`, `2m17s`, `1h2m3s` with higher-order zero units omitted and lower units shown once a higher unit appears.
+- R-6F74-SX99 — the turn driver calls `waiter.Start(conv.Model)` before draining the stream and `waiter.Stop()` on first output and via `defer` (covering success, error, empty, and interrupt); raw mode and non-TTY runs use `nopWaiter` so no status line appears in their output (asserted with a recording fake waiter at the repl level).
+- R-6HMX-KGQN — pre-roll and erase: a turn that produces output before the 2s pre-roll elapses paints nothing and erases nothing; a turn that outlives the pre-roll paints the line and, on `Stop`, erases it with `\r\x1b[2K` so the following block's leading separator leaves exactly one blank line (the one-blank spacing rule of Decision 5).
+
 ## Status
 
-Decided: Decisions 1–12 — package layout & seams; provider & model catalog; config-key namespace & coercion; CLI flags; turn execution & rendering; REPL lifecycle, interrupt & log integrity; usage & cost reporting; session log & session-id; slash-command dispatch & command set; built-in tools; error handling & REPL resilience; the self-describing `--help` catalog.
+Decided: Decisions 1–13 — package layout & seams; provider & model catalog; config-key namespace & coercion; CLI flags; turn execution & rendering; REPL lifecycle, interrupt & log integrity; usage & cost reporting; session log & session-id; slash-command dispatch & command set; built-in tools; error handling & REPL resilience; the self-describing `--help` catalog; the wait status line.
 
 The seams, public interfaces, naming, struct/type definitions, data model, and the testing approach are fully decided. The construction order that realizes this design lives in the plan.
