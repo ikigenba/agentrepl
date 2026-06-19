@@ -13,10 +13,11 @@ import (
 )
 
 type Target struct {
-	Conv       *agentkit.Conversation
-	Catalog    []catalog.Provider
-	Getenv     func(string) string
-	ZaiBaseURL string
+	Conv         *agentkit.Conversation
+	Catalog      []catalog.Provider
+	Getenv       func(string) string
+	ZaiBaseURL   string
+	ReasoningRaw string
 }
 
 var (
@@ -110,21 +111,23 @@ var fields = map[string]field{
 	),
 	"gen.reasoning": {
 		set: func(t *Target, raw string) error {
-			effort, ok := parseReasoning(raw)
-			if !ok {
-				return fmt.Errorf("%w: gen.reasoning: expected off, minimal, low, medium, high, max, or default", ErrBadValue)
+			value, display, err := parseReasoning(raw)
+			if err != nil {
+				return err
 			}
-			t.Conv.Gen.Reasoning = effort
+			t.Conv.Gen.Reasoning = value
+			t.ReasoningRaw = display
 			return nil
 		},
 		get: func(t *Target) string {
-			if t == nil || t.Conv == nil {
+			if t == nil || t.ReasoningRaw == "" {
 				return defaultValue
 			}
-			return formatReasoning(t.Conv.Gen.Reasoning)
+			return t.ReasoningRaw
 		},
 		reset: func(t *Target) error {
-			t.Conv.Gen.Reasoning = agentkit.EffortDefault
+			t.Conv.Gen.Reasoning = agentkit.ReasoningValue{}
+			t.ReasoningRaw = ""
 			return nil
 		},
 	},
@@ -309,44 +312,20 @@ func boolField(ptr func(*agentkit.Conversation) *bool) field {
 	}
 }
 
-func parseReasoning(raw string) (agentkit.ReasoningEffort, bool) {
-	switch raw {
-	case "default":
-		return agentkit.EffortDefault, true
-	case "off":
-		return agentkit.EffortOff, true
-	case "minimal":
-		return agentkit.EffortMinimal, true
-	case "low":
-		return agentkit.EffortLow, true
-	case "medium":
-		return agentkit.EffortMedium, true
-	case "high":
-		return agentkit.EffortHigh, true
-	case "max":
-		return agentkit.EffortMax, true
-	default:
-		return agentkit.EffortDefault, false
+func parseReasoning(raw string) (agentkit.ReasoningValue, string, error) {
+	display := strings.TrimSpace(raw)
+	if display == "" {
+		return agentkit.ReasoningValue{}, "", fmt.Errorf("%w: gen.reasoning: empty value", ErrBadValue)
 	}
-}
-
-func formatReasoning(effort agentkit.ReasoningEffort) string {
-	switch effort {
-	case agentkit.EffortOff:
-		return "off"
-	case agentkit.EffortMinimal:
-		return "minimal"
-	case agentkit.EffortLow:
-		return "low"
-	case agentkit.EffortMedium:
-		return "medium"
-	case agentkit.EffortHigh:
-		return "high"
-	case agentkit.EffortMax:
-		return "max"
-	default:
-		return defaultValue
+	normalized := strings.ToLower(display)
+	switch normalized {
+	case "off", "disable", "disabled":
+		return agentkit.DisableReasoning(), display, nil
 	}
+	if budget, err := strconv.Atoi(display); err == nil {
+		return agentkit.Budget(budget), display, nil
+	}
+	return agentkit.Level(display), display, nil
 }
 
 func getenv(t *Target) func(string) string {

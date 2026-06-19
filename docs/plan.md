@@ -122,7 +122,7 @@ Thread a per-construction override from config down to provider construction so 
 
 **Done when:** R-S94E-8K1O (catalog `Options`/`Build` threads `BaseURL`, zai applies `WithBaseURL`, others ignore) and R-SCS3-DV9R (config `zai.base_url` stores-and-rebuilds, order-independent with `provider`, `default` clears) are covered by clearly-named tests, the existing full-key-list ids still pass with the new key, and the suite is green.
 
-### Phase 11 — agentkit native-reasoning pin & native `gen.reasoning` coercion · ⬜ not started
+### Phase 11 — agentkit native-reasoning pin & native `gen.reasoning` coercion · ✅ done
 
 *Realizes design Decision 3 (the `gen.reasoning` native-value carve-out and `Target.ReasoningRaw`) and the Conventions' agentkit-version obligation. Depends on Phase 5 (config) and on the **external** prerequisite that the agentkit checkout the `replace` directive targets has built its native-reasoning surface — agentkit plan Phases 21–22: `ReasoningValue`/`Level`/`Budget`/`DisableReasoning`, the removed `ReasoningEffort`, and `Warning.Code`.*
 
