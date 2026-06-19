@@ -201,7 +201,7 @@ Because only the rendered bytes change, the decorated goldens under `testdata/` 
 
 **Done when:** R-OBNM-N6XX (the fixed palette, golden) and R-Q52T-PXCR (one blank line between blocks as a leading separator — no leading blank at start, no trailing blank after the summary, a `\n`-terminated tool output still one blank, a bare empty line none, golden) are covered by clearly-named tests (regenerated decorated goldens) and the suite is green.
 
-### Phase 20 — Wait status line: formatters & live driver · ⬜ not started
+### Phase 20 — Wait status line: formatters & live driver · ✅ done
 
 *Realizes design Decision 13 (the render-side half: the pure formatters and the live driver). Depends on Phase 19 (the gray palette register and the leading-separator/erase interaction) and Phase 6 (the render base).*
 

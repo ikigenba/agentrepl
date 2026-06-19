@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ikigenba/agentkit"
 )
@@ -283,6 +284,102 @@ func TestWarningGoldenRendersDistinctTreatmentAndRawCarriesFields(t *testing.T) 
 	if record["type"] != "warning" || record["Setting"] != "reasoning" || record["Code"] != float64(agentkit.WarnReasoningUnsupported) || record["Detail"] != warning.Detail {
 		t.Fatalf("raw warning record = %#v, want verbatim Setting/Code/Detail", record)
 	}
+}
+
+func TestWaitLineAndFormatElapsed(t *testing.T) {
+	// R-6DZ8-F5IK
+	t.Run("waitLine", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			model   string
+			elapsed time.Duration
+			color   bool
+			want    string
+		}{
+			{
+				name:    "plain",
+				model:   "openai/gpt-4.1",
+				elapsed: 5 * time.Second,
+				want:    "waiting for openai/gpt-4.1 (5s)",
+			},
+			{
+				name:    "gray wrapped",
+				model:   "zai/glm-4.5",
+				elapsed: 2*time.Minute + 17*time.Second,
+				color:   true,
+				want:    "\x1b[90mwaiting for zai/glm-4.5 (2m17s)\x1b[0m",
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got := waitLine(tt.model, tt.elapsed, tt.color)
+				if got != tt.want {
+					t.Fatalf("waitLine() = %q, want %q", got, tt.want)
+				}
+				if strings.HasPrefix(got, "\r\x1b[2K") || strings.HasSuffix(got, "\n") {
+					t.Fatalf("waitLine() = %q, want no erase prefix or trailing newline", got)
+				}
+			})
+		}
+	})
+
+	t.Run("formatElapsed", func(t *testing.T) {
+		tests := []struct {
+			name string
+			in   time.Duration
+			want string
+		}{
+			{name: "seconds", in: 5*time.Second + 900*time.Millisecond, want: "5s"},
+			{name: "minutes and seconds", in: 2*time.Minute + 17*time.Second, want: "2m17s"},
+			{name: "minute rollover keeps zero seconds", in: time.Minute, want: "1m0s"},
+			{name: "hours minutes and seconds", in: time.Hour + 2*time.Minute + 3*time.Second, want: "1h2m3s"},
+			{name: "hour rollover keeps lower units", in: time.Hour, want: "1h0m0s"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if got := formatElapsed(tt.in); got != tt.want {
+					t.Fatalf("formatElapsed(%s) = %q, want %q", tt.in, got, tt.want)
+				}
+			})
+		}
+	})
+}
+
+func TestLiveWaiterPreRollAndErase(t *testing.T) {
+	// R-6HMX-KGQN
+	t.Run("fast stop stays silent", func(t *testing.T) {
+		var buf bytes.Buffer
+		waiter := NewLiveWaiter(&buf, false)
+		waiter.Start("fast-model")
+		time.Sleep(100 * time.Millisecond)
+		waiter.Stop()
+		if got := buf.String(); got != "" {
+			t.Fatalf("fast waiter output = %q, want no paint and no erase", got)
+		}
+		waiter.Stop()
+		if got := buf.String(); got != "" {
+			t.Fatalf("idempotent stop output = %q, want unchanged empty output", got)
+		}
+	})
+
+	t.Run("slow stop erases painted line", func(t *testing.T) {
+		var buf bytes.Buffer
+		waiter := NewLiveWaiter(&buf, false)
+		waiter.Start("slow-model")
+		time.Sleep(2100 * time.Millisecond)
+		waiter.Stop()
+
+		got := buf.String()
+		if !strings.Contains(got, "\r\x1b[2Kwaiting for slow-model (2s)") {
+			t.Fatalf("slow waiter output = %q, want painted 2s wait line", got)
+		}
+		if !strings.HasSuffix(got, "\r\x1b[2K") {
+			t.Fatalf("slow waiter output = %q, want final erase", got)
+		}
+		if strings.Contains(got, "\n") {
+			t.Fatalf("slow waiter output = %q, want no newline from paint or erase", got)
+		}
+	})
 }
 
 func turnUsage() agentkit.Usage {

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
+	"time"
 
 	"github.com/ikigenba/agentkit"
 )
@@ -28,6 +30,123 @@ func NewDecorated(out io.Writer, color, tty bool) Renderer {
 // NewRaw returns the machine-readable JSONL renderer.
 func NewRaw(out io.Writer) Renderer {
 	return rawRenderer{out: out}
+}
+
+// NewLiveWaiter returns the TTY-only wait status line driver.
+func NewLiveWaiter(out io.Writer, color bool) *LiveWaiter {
+	return &LiveWaiter{out: out, color: color}
+}
+
+// LiveWaiter paints and erases the ephemeral wait status line.
+type LiveWaiter struct {
+	out   io.Writer
+	color bool
+
+	mu      sync.Mutex
+	stop    chan struct{}
+	done    chan struct{}
+	running bool
+	painted bool
+}
+
+func (w *LiveWaiter) Start(model string) {
+	w.mu.Lock()
+	if w.running {
+		w.mu.Unlock()
+		return
+	}
+	w.stop = make(chan struct{})
+	w.done = make(chan struct{})
+	w.running = true
+	w.painted = false
+	stop := w.stop
+	done := w.done
+	start := time.Now()
+	w.mu.Unlock()
+
+	go w.run(model, start, stop, done)
+}
+
+func (w *LiveWaiter) Stop() {
+	w.mu.Lock()
+	if !w.running {
+		w.mu.Unlock()
+		return
+	}
+	stop := w.stop
+	done := w.done
+	w.mu.Unlock()
+
+	close(stop)
+	<-done
+
+	w.mu.Lock()
+	if w.painted {
+		fmt.Fprint(w.out, "\r\x1b[2K")
+	}
+	w.stop = nil
+	w.done = nil
+	w.running = false
+	w.painted = false
+	w.mu.Unlock()
+}
+
+func (w *LiveWaiter) run(model string, start time.Time, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+
+	select {
+	case <-stop:
+		return
+	case <-timer.C:
+		w.paint(model, time.Since(start))
+	}
+
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			w.paint(model, time.Since(start))
+		}
+	}
+}
+
+func (w *LiveWaiter) paint(model string, elapsed time.Duration) {
+	w.mu.Lock()
+	fmt.Fprint(w.out, "\r\x1b[2K", waitLine(model, elapsed, w.color))
+	w.painted = true
+	w.mu.Unlock()
+}
+
+func waitLine(model string, elapsed time.Duration, color bool) string {
+	line := fmt.Sprintf("waiting for %s (%s)", model, formatElapsed(elapsed))
+	if !color {
+		return line
+	}
+	return ansiBrightBlack + line + ansiReset
+}
+
+func formatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	total := int(d / time.Second)
+	hours := total / 3600
+	minutes := (total % 3600) / 60
+	seconds := total % 60
+	if hours > 0 {
+		return fmt.Sprintf("%dh%dm%ds", hours, minutes, seconds)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%dm%ds", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", seconds)
 }
 
 type decoratedRenderer struct {
