@@ -138,7 +138,7 @@ Additive — the existing `Default()`/`Lookup`/`HasModel`/`Build` surface keeps 
 
 **Done when:** R-FQT4-7JCQ (`Default()` sets each `Reasoning` to its sub-package introspector, non-nil and credential-blind) and R-FS10-LB3F (reasoning anti-drift: every curated id resolves to a `ReasoningSpec`) are covered by clearly-named tests and the suite is green.
 
-### Phase 13 — Settings-warning relay (`Renderer.Warning` + turn driver) · ⬜ not started
+### Phase 13 — Settings-warning relay (`Renderer.Warning` + turn driver) · ✅ done
 
 *Realizes design Decision 5 (the `Renderer.Warning` method and the driver's verbatim warning relay) and amends Decision 11 (a warning is not an error and never ends the loop). Depends on Phase 6 (render), Phase 7b (turn driver), and Phase 11 (the agentkit pin that adds `Warning.Code`).*
 

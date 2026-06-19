@@ -164,6 +164,9 @@ func handleTurn(ctx context.Context, s *state, text string) {
 		s.exitCode = 130
 		return
 	}
+	for _, warning := range stream.Warnings() {
+		s.rend.Warning(warning)
+	}
 	if err := stream.Err(); err != nil {
 		s.rend.Error(err)
 		return

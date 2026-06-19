@@ -14,6 +14,7 @@ type Renderer interface {
 	Event(ev agentkit.Event)
 	Usage(turn agentkit.Usage, turnCost, total agentkit.Cost)
 	Summary(total agentkit.Usage, totalCost agentkit.Cost)
+	Warning(w agentkit.Warning)
 	Error(err error)
 	Notice(line string)
 }
@@ -96,6 +97,11 @@ func (r *decoratedRenderer) Summary(total agentkit.Usage, totalCost agentkit.Cos
 	fmt.Fprintf(r.out, "· cost     $%.6f session\n", totalCost.USD())
 }
 
+func (r *decoratedRenderer) Warning(w agentkit.Warning) {
+	r.finishStream()
+	fmt.Fprintf(r.out, "%swarning ›%s %s: %s\n", r.paint(ansiYellow), r.paint(ansiReset), w.Setting, w.Detail)
+}
+
 func (r *decoratedRenderer) Error(err error) {
 	r.finishStream()
 	fmt.Fprintf(r.out, "%serror ›%s %v\n", r.paint(ansiRed), r.paint(ansiReset), err)
@@ -163,6 +169,10 @@ func (r rawRenderer) Summary(total agentkit.Usage, totalCost agentkit.Cost) {
 	})
 }
 
+func (r rawRenderer) Warning(w agentkit.Warning) {
+	r.write(rawWarning{Type: "warning", Warning: w})
+}
+
 func (r rawRenderer) Error(err error) {
 	r.write(rawError{Type: "error", Error: err.Error()})
 }
@@ -206,6 +216,11 @@ type rawSummary struct {
 	Type           string         `json:"type"`
 	Usage          agentkit.Usage `json:"usage"`
 	SessionCostUSD string         `json:"session_cost_usd"`
+}
+
+type rawWarning struct {
+	Type string `json:"type"`
+	agentkit.Warning
 }
 
 type rawError struct {

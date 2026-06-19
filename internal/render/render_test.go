@@ -160,6 +160,47 @@ func TestRawJSONLGoldenSkipsDeltasAndCarriesUsageSummaryAndToolErrors(t *testing
 	}
 }
 
+func TestWarningGoldenRendersDistinctTreatmentAndRawCarriesFields(t *testing.T) {
+	// R-G5FW-SS92
+	warning := agentkit.Warning{
+		Setting: "reasoning",
+		Code:    agentkit.WarnReasoningUnsupported,
+		Detail:  "xhigh is not supported by test-model; using high",
+	}
+
+	var decorated bytes.Buffer
+	decoratedRender := NewDecorated(&decorated, false)
+	decoratedRender.Warning(warning)
+	decoratedRender.Error(assertErr("turn failed"))
+	gotDecorated := decorated.String()
+	assertGolden(t, "warning_decorated.golden", gotDecorated)
+	if !strings.Contains(gotDecorated, "warning › reasoning: xhigh is not supported") {
+		t.Fatalf("decorated warning = %q, want warning treatment with setting and detail", gotDecorated)
+	}
+	if !strings.Contains(gotDecorated, "error › turn failed") {
+		t.Fatalf("decorated output = %q, want error treatment for comparison", gotDecorated)
+	}
+	if strings.Index(gotDecorated, "warning ›") == strings.Index(gotDecorated, "error ›") {
+		t.Fatalf("decorated output = %q, warning and error treatments were not distinct", gotDecorated)
+	}
+
+	var raw bytes.Buffer
+	rawRender := NewRaw(&raw)
+	rawRender.Warning(warning)
+	gotRaw := raw.String()
+	assertJSONLines(t, gotRaw)
+	assertGolden(t, "warning_raw.golden", gotRaw)
+
+	records := decodeRawRecords(t, gotRaw)
+	if len(records) != 1 {
+		t.Fatalf("raw warning record count = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record["type"] != "warning" || record["Setting"] != "reasoning" || record["Code"] != float64(agentkit.WarnReasoningUnsupported) || record["Detail"] != warning.Detail {
+		t.Fatalf("raw warning record = %#v, want verbatim Setting/Code/Detail", record)
+	}
+}
+
 func turnUsage() agentkit.Usage {
 	return agentkit.Usage{
 		InputUncached:   123,

@@ -283,6 +283,64 @@ func TestFailedTurnRendersErrorSkipsUsageAndContinues(t *testing.T) {
 	assertLogTypes(t, log, []string{"turn_start", "error", "turn_end", "turn_start", "message", "usage", "turn_end", "summary"})
 }
 
+func TestTurnWarningsRelayBeforeUsageAndError(t *testing.T) {
+	// R-G480-F0ID
+	warnings := []agentkit.Warning{
+		{Setting: "reasoning", Code: agentkit.WarnReasoningUnsupported, Detail: "xhigh is not supported"},
+		{Setting: "tool_schema", Code: agentkit.WarnToolSchemaLossy, Detail: "dropped keyword"},
+	}
+	provider := newScriptedProvider(toolUseRoundWithWarnings(warnings), errorRound("provider failed"), successRound("after warning", usageOne()))
+	out, errOut, _, code := runScriptWithProvider(t, "warn then fail\nno warning\n/exit\n", Options{Raw: true}, provider)
+	if code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
+	}
+	records := decodeLogRecords(t, out)
+	gotTypes := recordTypes(t, records)
+	wantTypes := []string{"prompt", "message_done", "tool_use", "tool_result", "warning", "warning", "error", "prompt", "message_done", "usage", "summary"}
+	if !slices.Equal(gotTypes, wantTypes) {
+		t.Fatalf("stdout record types = %#v, want %#v\nstdout:\n%s", gotTypes, wantTypes, out)
+	}
+	first := records[4]
+	if first["Setting"] != warnings[0].Setting || first["Code"] != float64(warnings[0].Code) || first["Detail"] != warnings[0].Detail {
+		t.Fatalf("first warning = %#v, want verbatim %#v", first, warnings[0])
+	}
+	second := records[5]
+	if second["Setting"] != warnings[1].Setting || second["Code"] != float64(warnings[1].Code) || second["Detail"] != warnings[1].Detail {
+		t.Fatalf("second warning = %#v, want verbatim %#v", second, warnings[1])
+	}
+}
+
+func TestNonNativeReasoningWarningRelayedAndTurnCompletesWithDefault(t *testing.T) {
+	// R-G6NT-6JZR
+	provider := &reasoningWarningProvider{}
+	result := runScriptWithProviderContext(t, context.Background(), "hello\n/exit\n", Options{
+		Raw:    true,
+		Config: []string{"gen.reasoning=xhigh"},
+	}, provider)
+	if result.code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", result.code, result.stderr)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("provider request count = %d, want 1", len(provider.requests))
+	}
+	if level, ok := provider.requests[0].Gen.Reasoning.Level(); !ok || level != "xhigh" {
+		t.Fatalf("request reasoning = %#v, want non-native level xhigh from config carve-out", provider.requests[0].Gen.Reasoning)
+	}
+	records := decodeLogRecords(t, result.stdout)
+	gotTypes := recordTypes(t, records)
+	wantTypes := []string{"prompt", "message_done", "warning", "usage", "summary"}
+	if !slices.Equal(gotTypes, wantTypes) {
+		t.Fatalf("stdout record types = %#v, want %#v\nstdout:\n%s", gotTypes, wantTypes, result.stdout)
+	}
+	warning := records[2]
+	if warning["Setting"] != "reasoning" || warning["Code"] != float64(agentkit.WarnReasoningUnsupported) {
+		t.Fatalf("warning record = %#v, want reasoning unsupported warning", warning)
+	}
+	if !strings.Contains(result.stdout, `"type":"usage"`) || strings.Contains(result.stdout, `"type":"error"`) {
+		t.Fatalf("stdout = %q, want completed turn with usage and no error", result.stdout)
+	}
+}
+
 func TestUsageCommandRendersAgentkitCumulativeSummary(t *testing.T) {
 	// R-OSFJ-PSI8
 	provider := newScriptedProvider(successRound("first", usageOne()), successRound("second", usageTwo()))
@@ -764,6 +822,10 @@ func successRound(text string, usage agentkit.Usage) *agentkit.RoundTrip {
 }
 
 func toolUseRound() *agentkit.RoundTrip {
+	return toolUseRoundWithWarnings(nil)
+}
+
+func toolUseRoundWithWarnings(warnings []agentkit.Warning) *agentkit.RoundTrip {
 	message := agentkit.Message{
 		Role: agentkit.RoleAssistant,
 		Blocks: []agentkit.Block{agentkit.ToolUseBlock{
@@ -772,7 +834,7 @@ func toolUseRound() *agentkit.RoundTrip {
 			Input: json.RawMessage(`{"path":"missing.txt"}`),
 		}},
 	}
-	return agentkit.NewRoundTrip(nil, message, agentkit.FinishToolUse, usageOne(), nil, nil)
+	return agentkit.NewRoundTrip(nil, message, agentkit.FinishToolUse, usageOne(), warnings, nil)
 }
 
 func errorRound(message string) *agentkit.RoundTrip {
@@ -805,20 +867,62 @@ func usageTwo() agentkit.Usage {
 	}
 }
 
+type reasoningWarningProvider struct {
+	requests []agentkit.Request
+}
+
+func (p *reasoningWarningProvider) RoundTrip(_ context.Context, req *agentkit.Request) *agentkit.RoundTrip {
+	p.requests = append(p.requests, *req)
+	level, ok := req.Gen.Reasoning.Level()
+	if !ok || level != "xhigh" {
+		return errorRound("missing non-native reasoning level")
+	}
+	message := agentkit.Message{
+		Role:   agentkit.RoleAssistant,
+		Blocks: []agentkit.Block{agentkit.TextBlock{Text: "defaulted"}},
+	}
+	warnings := []agentkit.Warning{{
+		Setting: "reasoning",
+		Code:    agentkit.WarnReasoningUnsupported,
+		Detail:  "xhigh is not supported by test-model; using high",
+	}}
+	return agentkit.NewRoundTrip(eventSeq(agentkit.TextDelta{Text: "defaulted"}), message, agentkit.FinishStop, usageOne(), warnings, nil)
+}
+
+func (p *reasoningWarningProvider) Name() string {
+	return "test"
+}
+
+func (p *reasoningWarningProvider) Pricing(model string) (agentkit.Pricing, bool) {
+	if model != "test-model" {
+		return agentkit.Pricing{}, false
+	}
+	return agentkit.Pricing{Tiers: []agentkit.RateTier{{
+		InputUncached: 10_000,
+		Output:        20_000,
+	}}}, true
+}
+
 func assertLogTypes(t *testing.T, log string, want []string) {
 	t.Helper()
 	records := decodeLogRecords(t, log)
+	got := recordTypes(t, records)
+	if !slices.Equal(got, want) {
+		t.Fatalf("log types = %#v, want %#v\nlog:\n%s", got, want, log)
+	}
+}
+
+func recordTypes(t *testing.T, records []map[string]any) []string {
+	t.Helper()
 	got := make([]string, 0, len(records))
 	for _, record := range records {
 		value, ok := record["type"].(string)
 		if !ok {
-			t.Fatalf("log record missing string type: %#v", record)
+			t.Fatalf("record missing string type: %#v", record)
 		}
 		got = append(got, value)
 	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("log types = %#v, want %#v\nlog:\n%s", got, want, log)
-	}
+	return got
 }
 
 func awaitRun(t *testing.T, done <-chan int) int {
