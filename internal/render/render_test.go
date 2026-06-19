@@ -20,8 +20,10 @@ func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *
 	// R-LL9K-SKDQ
 	// R-LRD2-PF37
 	// R-JFBW-TYU8
+	// R-OBNM-N6XX
+	// R-Q52T-PXCR
 	var buf bytes.Buffer
-	render := NewDecorated(&buf, false, false)
+	render := NewDecorated(&buf, false, true)
 
 	render.Prompt()
 	render.Input("hello")
@@ -30,7 +32,7 @@ func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *
 	render.Event(agentkit.TextDelta{Text: "Hi there"})
 	render.Event(agentkit.MessageDone{})
 	render.Event(agentkit.ToolUse{ID: "toolu_1", Name: "read", Input: json.RawMessage(`{"path":"missing.txt"}`)})
-	render.Event(agentkit.ToolResult{ID: "toolu_1", Name: "read", Output: "contents"})
+	render.Event(agentkit.ToolResult{ID: "toolu_1", Name: "read", Output: "contents\n"})
 	render.Event(agentkit.ToolResult{ID: "toolu_2", Name: "read", Output: "open missing.txt: no such file", IsError: true})
 	render.Usage(turnUsage(), agentkit.Cost(1_234_000), agentkit.Cost(5_678_000))
 	render.Summary(summaryUsage(), agentkit.Cost(6_789_000))
@@ -38,6 +40,7 @@ func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *
 	got := buf.String()
 	assertGolden(t, "decorated.golden", got)
 	for _, want := range []string{
+		"you › ",
 		"reasoning › checking",
 		"assistant › Hi there",
 		`tool call › read {"path":"missing.txt"}`,
@@ -55,10 +58,19 @@ func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *
 			t.Fatalf("decorated output contains %q:\n%s", notWant, got)
 		}
 	}
+	for _, notWant := range []string{"\n\n\n", "contents\n\n\n"} {
+		if strings.Contains(got, notWant) {
+			t.Fatalf("decorated output has too much vertical space %q:\n%s", notWant, got)
+		}
+	}
+	if strings.HasPrefix(got, "\n") || strings.HasSuffix(got, "\n\n") {
+		t.Fatalf("decorated output has leading or trailing blank line:\n%q", got)
+	}
 }
 
 func TestDecoratedTTYPromptGoldenAndInputNoEcho(t *testing.T) {
 	// R-JFBW-TYU8
+	// R-Q52T-PXCR
 	var tty bytes.Buffer
 	ttyRender := NewDecorated(&tty, false, true)
 	ttyRender.Prompt()
@@ -66,6 +78,14 @@ func TestDecoratedTTYPromptGoldenAndInputNoEcho(t *testing.T) {
 	assertGolden(t, "decorated_tty_prompt.golden", tty.String())
 	if strings.Contains(tty.String(), "hello") || strings.Contains(tty.String(), "\n") {
 		t.Fatalf("tty prompt output = %q, want prompt only with no echoed input or newline", tty.String())
+	}
+
+	var prompts bytes.Buffer
+	promptRender := NewDecorated(&prompts, false, true)
+	promptRender.Prompt()
+	promptRender.Prompt()
+	if strings.Contains(prompts.String(), "\n") {
+		t.Fatalf("consecutive prompts output = %q, want no separator for a bare empty line", prompts.String())
 	}
 
 	var nonTTY bytes.Buffer
@@ -102,10 +122,13 @@ func TestDecoratedStreamsDeltasIncrementally(t *testing.T) {
 
 func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 	// R-LNPD-K3V4
+	// R-OBNM-N6XX
 	var color bytes.Buffer
 	colorRender := NewDecorated(&color, true, true)
 	colorRender.Prompt()
 	colorRender.Event(agentkit.TextDelta{Text: "Hi"})
+	colorRender.Event(agentkit.ToolUse{Name: "read", Input: json.RawMessage(`{"path":"ok.txt"}`)})
+	colorRender.Event(agentkit.ToolResult{Name: "read", Output: "ok"})
 	colorRender.Event(agentkit.ToolResult{Name: "read", Output: "missing", IsError: true})
 	colorRender.Error(assertErr("boom"))
 
@@ -113,12 +136,25 @@ func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 	if !strings.Contains(gotColor, "\x1b[") {
 		t.Fatalf("color output = %q, want ANSI escape sequence", gotColor)
 	}
+	for _, want := range []string{
+		"\x1b[1myou ›\x1b[0m",
+		"\x1b[1m\x1b[94massistant ›\x1b[0m \x1b[94mHi",
+		"\x1b[90mtool call › read {\"path\":\"ok.txt\"}\x1b[0m",
+		"\x1b[90mtool result › read: ok\x1b[0m",
+		"\x1b[31mtool error › read: missing\x1b[0m",
+	} {
+		if !strings.Contains(gotColor, want) {
+			t.Fatalf("color output missing palette sequence %q:\n%q", want, gotColor)
+		}
+	}
 	assertGolden(t, "decorated_color.golden", visibleANSI(gotColor))
 
 	var plain bytes.Buffer
 	plainRender := NewDecorated(&plain, false, true)
 	plainRender.Prompt()
 	plainRender.Event(agentkit.TextDelta{Text: "Hi"})
+	plainRender.Event(agentkit.ToolUse{Name: "read", Input: json.RawMessage(`{"path":"ok.txt"}`)})
+	plainRender.Event(agentkit.ToolResult{Name: "read", Output: "ok"})
 	plainRender.Event(agentkit.ToolResult{Name: "read", Output: "missing", IsError: true})
 	plainRender.Error(assertErr("boom"))
 

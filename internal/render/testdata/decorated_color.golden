@@ -1,3 +1,10 @@
-<ESC>[1myou ›<ESC>[0m <ESC>[32massistant ›<ESC>[0m Hi
-<ESC>[31mtool error ›<ESC>[0m read: missing
+<ESC>[1myou ›<ESC>[0m 
+<ESC>[1m<ESC>[94massistant ›<ESC>[0m <ESC>[94mHi<ESC>[0m
+
+<ESC>[90mtool call › read {"path":"ok.txt"}<ESC>[0m
+
+<ESC>[90mtool result › read: ok<ESC>[0m
+
+<ESC>[31mtool error › read: missing<ESC>[0m
+
 <ESC>[31merror ›<ESC>[0m boom

@@ -31,10 +31,12 @@ func NewRaw(out io.Writer) Renderer {
 }
 
 type decoratedRenderer struct {
-	out       io.Writer
-	color     bool
-	tty       bool
-	streaming bool
+	out        io.Writer
+	color      bool
+	tty        bool
+	streaming  bool
+	drewBlock  bool
+	lastPrompt bool
 }
 
 func (r *decoratedRenderer) Prompt() {
@@ -42,6 +44,7 @@ func (r *decoratedRenderer) Prompt() {
 	if !r.tty {
 		return
 	}
+	r.startBlock(true)
 	fmt.Fprintf(r.out, "%syou ›%s ", r.paint(ansiBold), r.paint(ansiReset))
 }
 
@@ -52,13 +55,16 @@ func (r *decoratedRenderer) Event(ev agentkit.Event) {
 	switch ev := ev.(type) {
 	case agentkit.TextDelta:
 		if !r.streaming {
-			fmt.Fprintf(r.out, "%sassistant ›%s ", r.paint(ansiGreen), r.paint(ansiReset))
+			r.startBlock(false)
+			fmt.Fprintf(r.out, "%s%sassistant ›%s %s", r.paint(ansiBold), r.paint(ansiBrightBlue), r.paint(ansiReset), r.paint(ansiBrightBlue))
 			r.streaming = true
 		}
 		fmt.Fprint(r.out, ev.Text)
 	case agentkit.ReasoningDelta:
 		if !r.streaming {
-			fmt.Fprintf(r.out, "%sreasoning ›%s ", r.paint(ansiDim), r.paint(ansiReset))
+			r.startBlock(false)
+			fmt.Fprintf(r.out, "%sreasoning › %s", r.paint(ansiDim), r.paint(ansiReset))
+			fmt.Fprint(r.out, r.paint(ansiDim))
 			r.streaming = true
 		}
 		fmt.Fprint(r.out, ev.Text)
@@ -66,14 +72,16 @@ func (r *decoratedRenderer) Event(ev agentkit.Event) {
 		r.finishStream()
 	case agentkit.ToolUse:
 		r.finishStream()
-		fmt.Fprintf(r.out, "%stool call ›%s %s %s\n", r.paint(ansiCyan), r.paint(ansiReset), ev.Name, string(ev.Input))
+		r.startBlock(false)
+		fmt.Fprintf(r.out, "%stool call › %s %s%s\n", r.paint(ansiBrightBlack), ev.Name, trimOneTrailingNewline(string(ev.Input)), r.paint(ansiReset))
 	case agentkit.ToolResult:
 		r.finishStream()
 		label := "tool result ›"
 		if ev.IsError {
 			label = "tool error ›"
 		}
-		fmt.Fprintf(r.out, "%s%s%s %s: %s\n", r.resultColor(ev.IsError), label, r.paint(ansiReset), ev.Name, ev.Output)
+		r.startBlock(false)
+		fmt.Fprintf(r.out, "%s%s %s: %s%s\n", r.resultColor(ev.IsError), label, ev.Name, trimOneTrailingNewline(ev.Output), r.paint(ansiReset))
 	}
 }
 
@@ -82,6 +90,7 @@ func (r *decoratedRenderer) Usage(turn agentkit.Usage, turnCost, total agentkit.
 
 func (r *decoratedRenderer) Summary(total agentkit.Usage, totalCost agentkit.Cost) {
 	r.finishStream()
+	r.startBlock(false)
 	fmt.Fprintln(r.out, "summary")
 	fmt.Fprintf(r.out, "· tokens  in=%d cache(r=%d w=%d) out=%d reasoning=%d total=%d\n",
 		total.InputUncached,
@@ -96,31 +105,46 @@ func (r *decoratedRenderer) Summary(total agentkit.Usage, totalCost agentkit.Cos
 
 func (r *decoratedRenderer) Warning(w agentkit.Warning) {
 	r.finishStream()
+	r.startBlock(false)
 	fmt.Fprintf(r.out, "%swarning ›%s %s: %s\n", r.paint(ansiYellow), r.paint(ansiReset), w.Setting, w.Detail)
 }
 
 func (r *decoratedRenderer) Error(err error) {
 	r.finishStream()
+	r.startBlock(false)
 	fmt.Fprintf(r.out, "%serror ›%s %v\n", r.paint(ansiRed), r.paint(ansiReset), err)
 }
 
 func (r *decoratedRenderer) Notice(line string) {
 	r.finishStream()
+	r.startBlock(false)
 	fmt.Fprintf(r.out, "notice › %s\n", line)
 }
 
 func (r *decoratedRenderer) finishStream() {
 	if r.streaming {
-		fmt.Fprintln(r.out)
+		fmt.Fprintln(r.out, r.paint(ansiReset))
 		r.streaming = false
 	}
+}
+
+func (r *decoratedRenderer) startBlock(prompt bool) {
+	if !r.drewBlock {
+		r.drewBlock = true
+		r.lastPrompt = prompt
+		return
+	}
+	if !(prompt && r.lastPrompt) {
+		fmt.Fprintln(r.out)
+	}
+	r.lastPrompt = prompt
 }
 
 func (r *decoratedRenderer) resultColor(isError bool) string {
 	if isError {
 		return r.paint(ansiRed)
 	}
-	return r.paint(ansiYellow)
+	return r.paint(ansiBrightBlack)
 }
 
 func (r *decoratedRenderer) paint(code string) string {
@@ -237,12 +261,23 @@ func formatUSD(cost agentkit.Cost) string {
 	return fmt.Sprintf("%.6f", cost.USD())
 }
 
+func trimOneTrailingNewline(s string) string {
+	if len(s) == 0 || s[len(s)-1] != '\n' {
+		return s
+	}
+	s = s[:len(s)-1]
+	if len(s) > 0 && s[len(s)-1] == '\r' {
+		return s[:len(s)-1]
+	}
+	return s
+}
+
 const (
-	ansiReset  = "\x1b[0m"
-	ansiBold   = "\x1b[1m"
-	ansiDim    = "\x1b[2m"
-	ansiGreen  = "\x1b[32m"
-	ansiYellow = "\x1b[33m"
-	ansiCyan   = "\x1b[36m"
-	ansiRed    = "\x1b[31m"
+	ansiReset       = "\x1b[0m"
+	ansiBold        = "\x1b[1m"
+	ansiDim         = "\x1b[2m"
+	ansiYellow      = "\x1b[33m"
+	ansiRed         = "\x1b[31m"
+	ansiBrightBlack = "\x1b[90m"
+	ansiBrightBlue  = "\x1b[94m"
 )

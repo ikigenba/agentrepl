@@ -1,3 +1,10 @@
-you › assistant › Hi
+you › 
+assistant › Hi
+
+tool call › read {"path":"ok.txt"}
+
+tool result › read: ok
+
 tool error › read: missing
+
 error › boom

@@ -464,10 +464,10 @@ func TestTTYPromptPrecedesEachInputReadAndDoesNotEchoInput(t *testing.T) {
 	if got := strings.Count(result.stdout, "you › "); got < 6 {
 		t.Fatalf("stdout = %q, prompt count = %d, want prompt before command, empty line, turn, and exit reads", result.stdout, got)
 	}
-	if !strings.Contains(result.stdout, "you › notice › /clear") {
+	if !strings.Contains(result.stdout, "you › \nnotice › /clear") {
 		t.Fatalf("stdout = %q, want first prompt to precede /help output", result.stdout)
 	}
-	if !strings.Contains(result.stdout, "you › assistant › hi") {
+	if !strings.Contains(result.stdout, "you › \nassistant › hi") {
 		t.Fatalf("stdout = %q, want turn prompt to precede assistant output", result.stdout)
 	}
 	if strings.Contains(result.stdout, "you › hello") {
