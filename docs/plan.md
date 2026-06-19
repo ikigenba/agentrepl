@@ -209,7 +209,7 @@ Additive to `internal/render`; nothing existing changes shape. Build the pure, t
 
 **Done when:** R-6DZ8-F5IK (`waitLine`/`formatElapsed` pure and table-tested — the line text and color wrapping, the elapsed rollover) and R-6HMX-KGQN (pre-roll and erase: a turn that ends before the 2s pre-roll paints nothing and erases nothing; one that outlives it paints and, on `Stop`, erases with `\r\x1b[2K`) are covered by clearly-named tests and the suite is green.
 
-### Phase 21 — Wait status line: seam wiring & composition root · ⬜ not started
+### Phase 21 — Wait status line: seam wiring & composition root · ✅ done
 
 *Realizes design Decision 13 (the driver-side half: the `Waiter` seam, the driver's `Start`/`Stop` calls, and the TTY-gated bind), the Decision 1 `Waiter` seam-table row (no ids), and the Decision 5 driver wiring. Depends on Phase 20 (the `LiveWaiter` it binds), Phase 7b (the turn driver it extends), and Phase 8 (the composition root it wires).*
 

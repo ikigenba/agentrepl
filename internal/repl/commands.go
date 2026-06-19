@@ -18,15 +18,17 @@ type command struct {
 }
 
 type state struct {
-	conv     *agentkit.Conversation
-	target   *config.Target
-	cat      []catalog.Provider
-	io       IO
-	rend     render.Renderer
-	color    bool
-	getenv   func(string) string
-	quit     bool
-	exitCode int
+	conv       *agentkit.Conversation
+	target     *config.Target
+	cat        []catalog.Provider
+	io         IO
+	rend       render.Renderer
+	color      bool
+	getenv     func(string) string
+	liveWaiter Waiter
+	waiter     Waiter
+	quit       bool
+	exitCode   int
 }
 
 var commands map[string]command
@@ -91,8 +93,10 @@ func init() {
 				switch strings.TrimSpace(args) {
 				case "decorated":
 					s.rend = render.NewDecorated(s.io.Out, s.color, s.io.IsTTY)
+					s.waiter = activeWaiter(s.liveWaiter, s.io.IsTTY, false)
 				case "raw":
 					s.rend = render.NewRaw(s.io.Out)
+					s.waiter = activeWaiter(s.liveWaiter, s.io.IsTTY, true)
 				default:
 					return fmt.Errorf("usage: /render <decorated|raw>")
 				}

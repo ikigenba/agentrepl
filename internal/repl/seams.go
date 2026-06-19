@@ -15,6 +15,17 @@ type Getenv func(string) string
 
 type Now func() time.Time
 
+type Waiter interface {
+	Start(model string)
+	Stop()
+}
+
+type nopWaiter struct{}
+
+func (nopWaiter) Start(string) {}
+
+func (nopWaiter) Stop() {}
+
 // Options is the parsed launch surface.
 type Options struct {
 	Config []string
@@ -26,5 +37,6 @@ type Deps struct {
 	IO     IO
 	Getenv func(string) string
 	Now    func() time.Time
+	Waiter Waiter
 	LogDir string
 }

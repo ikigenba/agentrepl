@@ -475,6 +475,146 @@ func TestTTYPromptPrecedesEachInputReadAndDoesNotEchoInput(t *testing.T) {
 	}
 }
 
+func TestWaiterStopsOnFirstOutputAndAgainByDefer(t *testing.T) {
+	// R-6F74-SX99
+	var calls []string
+	waiter := &recordingWaiter{calls: &calls}
+	rend := &recordingRenderer{calls: &calls}
+	provider := newScriptedProvider(successRound("hi", usageOne()))
+	conv := &agentkit.Conversation{Provider: provider, Model: "test-model"}
+	state := &state{conv: conv, rend: rend, waiter: waiter}
+
+	handleTurn(context.Background(), state, "hello")
+
+	if state.quit {
+		t.Fatalf("state.quit = true, want false")
+	}
+	if len(calls) < 4 {
+		t.Fatalf("calls = %#v, want waiter start, first-output stop, render event, defer stop", calls)
+	}
+	if calls[0] != "waiter:start:test-model" {
+		t.Fatalf("calls = %#v, want Start with model before output", calls)
+	}
+	if calls[1] != "waiter:stop" {
+		t.Fatalf("calls = %#v, want Stop before first rendered event", calls)
+	}
+	if !strings.HasPrefix(calls[2], "render:event:") {
+		t.Fatalf("calls = %#v, want rendered event after first Stop", calls)
+	}
+	if calls[len(calls)-1] != "waiter:stop" {
+		t.Fatalf("calls = %#v, want defer Stop at end of turn", calls)
+	}
+}
+
+func TestWaiterStopsByDeferForErrorEmptyAndInterrupt(t *testing.T) {
+	// R-6F74-SX99
+	tests := []struct {
+		name      string
+		run       func(t *testing.T, calls *[]string) *state
+		wantQuit  bool
+		wantCode  int
+		wantCalls []string
+	}{
+		{
+			name: "error",
+			run: func(t *testing.T, calls *[]string) *state {
+				t.Helper()
+				state := newWaiterTestState(calls, newScriptedProvider(errorRound("provider failed")))
+				handleTurn(context.Background(), state, "hello")
+				return state
+			},
+			wantCalls: []string{"waiter:start:test-model", "waiter:stop", "render:error:provider failed", "waiter:stop"},
+		},
+		{
+			name: "empty",
+			run: func(t *testing.T, calls *[]string) *state {
+				t.Helper()
+				empty := agentkit.NewRoundTrip(nil, agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, nil)
+				state := newWaiterTestState(calls, newScriptedProvider(empty))
+				handleTurn(context.Background(), state, "hello")
+				return state
+			},
+			wantCalls: []string{"waiter:start:test-model", "waiter:stop", "render:event:agentkit.MessageDone", "render:usage", "waiter:stop"},
+		},
+		{
+			name: "interrupt",
+			run: func(t *testing.T, calls *[]string) *state {
+				t.Helper()
+				provider := newBlockingProvider()
+				state := newWaiterTestState(calls, provider)
+				ctx, cancel := context.WithCancel(context.Background())
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					handleTurn(ctx, state, "hello")
+				}()
+				<-provider.started
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+					t.Fatal("handleTurn did not return after interrupt")
+				}
+				return state
+			},
+			wantQuit:  true,
+			wantCode:  130,
+			wantCalls: []string{"waiter:start:test-model", "waiter:stop", "render:notice:interrupted", "waiter:stop"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			state := tc.run(t, &calls)
+			if !slices.Equal(calls, tc.wantCalls) {
+				t.Fatalf("calls = %#v, want %#v", calls, tc.wantCalls)
+			}
+			if state.quit != tc.wantQuit {
+				t.Fatalf("state.quit = %v, want %v", state.quit, tc.wantQuit)
+			}
+			if state.exitCode != tc.wantCode {
+				t.Fatalf("state.exitCode = %d, want %d", state.exitCode, tc.wantCode)
+			}
+		})
+	}
+}
+
+func TestWaiterIsNopForRawAndNonTTYRuns(t *testing.T) {
+	// R-6F74-SX99
+	tests := []struct {
+		name   string
+		script string
+		ioDeps IO
+		opts   Options
+	}{
+		{
+			name:   "render raw command",
+			script: "/render raw\nhello\n/exit\n",
+			ioDeps: IO{IsTTY: true},
+		},
+		{
+			name:   "non tty decorated",
+			script: "hello\n/exit\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			waiter := &recordingWaiter{}
+			result := runScriptWithProviderContextIOAndWaiter(t, context.Background(), tc.script, tc.opts, newScriptedProvider(successRound("hi", usageOne())), tc.ioDeps, waiter)
+			if result.code != 0 {
+				t.Fatalf("Run exit code = %d, stderr %q", result.code, result.stderr)
+			}
+			if len(waiter.ownedCalls) != 0 {
+				t.Fatalf("waiter calls = %#v, want none", waiter.ownedCalls)
+			}
+			if strings.Contains(result.stdout, "waiting for test-model") {
+				t.Fatalf("stdout = %q, want no wait status line", result.stdout)
+			}
+		})
+	}
+}
+
 func TestFailedTurnRendersErrorSkipsUsageAndContinues(t *testing.T) {
 	// R-LSKZ-36TW
 	// R-OPZQ-Y90U
@@ -919,6 +1059,11 @@ func runScriptWithProviderContext(t *testing.T, ctx context.Context, script stri
 
 func runScriptWithProviderContextAndIO(t *testing.T, ctx context.Context, script string, opts Options, provider agentkit.Provider, ioDeps IO) runResult {
 	t.Helper()
+	return runScriptWithProviderContextIOAndWaiter(t, ctx, script, opts, provider, ioDeps, nil)
+}
+
+func runScriptWithProviderContextIOAndWaiter(t *testing.T, ctx context.Context, script string, opts Options, provider agentkit.Provider, ioDeps IO, waiter Waiter) runResult {
+	t.Helper()
 	originalCatalog := defaultCatalog
 	defaultCatalog = func() []catalog.Provider {
 		return []catalog.Provider{{
@@ -953,6 +1098,7 @@ func runScriptWithProviderContextAndIO(t *testing.T, ctx context.Context, script
 		Now: func() time.Time {
 			return time.Date(2026, 6, 18, 12, 0, 0, 123456000, time.UTC)
 		},
+		Waiter: waiter,
 		LogDir: logDir,
 	}, Options{
 		Config: append([]string{"provider=test", "model=test-model"}, opts.Config...),
@@ -963,6 +1109,69 @@ func runScriptWithProviderContextAndIO(t *testing.T, ctx context.Context, script
 		stderr: errOut.String(),
 		log:    readOnlyLog(t, logDir),
 		code:   code,
+	}
+}
+
+type recordingWaiter struct {
+	calls      *[]string
+	ownedCalls []string
+}
+
+func (w *recordingWaiter) Start(model string) {
+	w.append("waiter:start:" + model)
+}
+
+func (w *recordingWaiter) Stop() {
+	w.append("waiter:stop")
+}
+
+func (w *recordingWaiter) append(call string) {
+	if w.calls != nil {
+		*w.calls = append(*w.calls, call)
+		return
+	}
+	w.ownedCalls = append(w.ownedCalls, call)
+}
+
+type recordingRenderer struct {
+	calls *[]string
+}
+
+func (r *recordingRenderer) Prompt() {}
+
+func (r *recordingRenderer) Input(string) {}
+
+func (r *recordingRenderer) Event(ev agentkit.Event) {
+	r.append(fmt.Sprintf("render:event:%T", ev))
+}
+
+func (r *recordingRenderer) Usage(agentkit.Usage, agentkit.Cost, agentkit.Cost) {
+	r.append("render:usage")
+}
+
+func (r *recordingRenderer) Summary(agentkit.Usage, agentkit.Cost) {}
+
+func (r *recordingRenderer) Warning(w agentkit.Warning) {
+	r.append("render:warning:" + w.Detail)
+}
+
+func (r *recordingRenderer) Error(err error) {
+	r.append("render:error:" + err.Error())
+}
+
+func (r *recordingRenderer) Notice(line string) {
+	r.append("render:notice:" + line)
+}
+
+func (r *recordingRenderer) append(call string) {
+	*r.calls = append(*r.calls, call)
+}
+
+func newWaiterTestState(calls *[]string, provider agentkit.Provider) *state {
+	return &state{
+		conv:   &agentkit.Conversation{Provider: provider, Model: "test-model"},
+		rend:   &recordingRenderer{calls: calls},
+		waiter: &recordingWaiter{calls: calls},
 	}
 }
 
@@ -1042,6 +1251,34 @@ func (p *interruptProvider) Name() string {
 }
 
 func (p *interruptProvider) Pricing(model string) (agentkit.Pricing, bool) {
+	if model != "test-model" {
+		return agentkit.Pricing{}, false
+	}
+	return agentkit.Pricing{Tiers: []agentkit.RateTier{{
+		InputUncached: 10_000,
+		Output:        20_000,
+	}}}, true
+}
+
+type blockingProvider struct {
+	started chan struct{}
+}
+
+func newBlockingProvider() *blockingProvider {
+	return &blockingProvider{started: make(chan struct{})}
+}
+
+func (p *blockingProvider) RoundTrip(ctx context.Context, _ *agentkit.Request) *agentkit.RoundTrip {
+	close(p.started)
+	<-ctx.Done()
+	return agentkit.NewRoundTrip(nil, agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, ctx.Err())
+}
+
+func (p *blockingProvider) Name() string {
+	return "test"
+}
+
+func (p *blockingProvider) Pricing(model string) (agentkit.Pricing, bool) {
 	if model != "test-model" {
 		return agentkit.Pricing{}, false
 	}

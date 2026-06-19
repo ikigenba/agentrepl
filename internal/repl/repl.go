@@ -56,13 +56,15 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 
 	color := d.IO.IsTTY && d.Getenv("NO_COLOR") == ""
 	state := &state{
-		conv:   conv,
-		target: target,
-		cat:    cat,
-		io:     d.IO,
-		rend:   newRenderer(d.IO.Out, color, d.IO.IsTTY, opts.Raw),
-		color:  color,
-		getenv: d.Getenv,
+		conv:       conv,
+		target:     target,
+		cat:        cat,
+		io:         d.IO,
+		rend:       newRenderer(d.IO.Out, color, d.IO.IsTTY, opts.Raw),
+		color:      color,
+		getenv:     d.Getenv,
+		liveWaiter: d.Waiter,
+		waiter:     activeWaiter(d.Waiter, d.IO.IsTTY, opts.Raw),
 	}
 	defer log.Close()
 	defer conv.Close()
@@ -139,6 +141,9 @@ func normalizeDeps(d Deps) Deps {
 	if d.Getenv == nil {
 		d.Getenv = func(string) string { return "" }
 	}
+	if d.Waiter == nil {
+		d.Waiter = nopWaiter{}
+	}
 	return d
 }
 
@@ -151,24 +156,46 @@ func newRenderer(out io.Writer, color, tty, raw bool) render.Renderer {
 
 func handleTurn(ctx context.Context, s *state, text string) {
 	s.rend.Input(text)
+	s.waiter.Start(s.conv.Model)
+	defer s.waiter.Stop()
 	stream := s.conv.Send(ctx, text)
+	stoppedForOutput := false
+	stopBeforeOutput := func() {
+		if stoppedForOutput {
+			return
+		}
+		s.waiter.Stop()
+		stoppedForOutput = true
+	}
 	for ev := range stream.Events() {
+		stopBeforeOutput()
 		s.rend.Event(ev)
 	}
 	if ctx.Err() != nil {
+		stopBeforeOutput()
 		s.rend.Notice("interrupted")
 		s.quit = true
 		s.exitCode = 130
 		return
 	}
 	for _, warning := range stream.Warnings() {
+		stopBeforeOutput()
 		s.rend.Warning(warning)
 	}
 	if err := stream.Err(); err != nil {
+		stopBeforeOutput()
 		s.rend.Error(err)
 		return
 	}
+	stopBeforeOutput()
 	s.rend.Usage(stream.Usage(), stream.Cost(), s.conv.TotalCost())
+}
+
+func activeWaiter(waiter Waiter, tty, raw bool) Waiter {
+	if raw || !tty || waiter == nil {
+		return nopWaiter{}
+	}
+	return waiter
 }
 
 var defaultCatalog = catalog.Default

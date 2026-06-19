@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ikigenba/agentrepl/internal/render"
 	"github.com/ikigenba/agentrepl/internal/repl"
 )
 
@@ -40,6 +41,11 @@ func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	var waiter repl.Waiter
+	if isTTY {
+		waiter = render.NewLiveWaiter(out, os.Getenv("NO_COLOR") == "")
+	}
+
 	return repl.Run(ctx, repl.Deps{
 		IO: repl.IO{
 			In:    in,
@@ -49,6 +55,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
 		},
 		Getenv: os.Getenv,
 		Now:    time.Now,
+		Waiter: waiter,
 		LogDir: filepath.Join(home, ".agentkit"),
 	}, opts)
 }
