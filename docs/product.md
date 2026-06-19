@@ -23,6 +23,7 @@ agentrepl covers, for v1:
 - **A single generic config passthrough** for agentkit's conversation settings: a repeatable `key=value` flag whose keys mirror agentkit's own configuration structure (provider, model, system prompt, generation settings, retry policy, tool-loop limit, and any future knob). The same key namespace is reachable at runtime through a slash-command and is dumpable on demand. New agentkit settings become new keys without new bespoke flags. The same vocabulary also exposes the per-provider construction overrides agentkit supports — notably the Z.ai API base URL — as keyed entries, so they too are set without a bespoke flag.
 - **Four built-in local tools** registered with agentkit and offered to the model — `bash`, `read`, `write`, `edit` — all operating relative to agentrepl's current working directory. They are a fixed set, always present; they exist to prove that a consumer can supply tools and that agentkit drives the tool loop. (`bash` doubles as the original example's single-tool demonstration.)
 - **All four agentkit providers** selectable — Anthropic, Google (Gemini), OpenAI, and Z.ai — choosing from agentkit's curated model set, at launch and between turns.
+- **A self-describing `--help`.** Launch-time help enumerates, statically, the available providers in one list and the models grouped by provider in another, and — for each model — its native reasoning control: the term that model uses and the values it accepts (its discrete levels, or its valid token-budget range), as reported by agentkit rather than hardcoded by agentrepl. The help checks no credentials and reflects no live environment: it is a catalog of what can be *asked for*, not what is currently usable.
 - **Provider/model switching mid-conversation**, with prior history carried over.
 - **Streaming replies**, with the model's incremental text and reasoning visible as they arrive.
 - **Full visibility of the exchange**: the user's prompts, the model's replies and reasoning, every tool-call request with its arguments, and every tool result fed back.
@@ -44,7 +45,7 @@ It deliberately does **nothing else.** In particular:
 These fixed, promised values the design must use verbatim and never re-declare:
 
 - **Module / repository path:** `github.com/ikigenba/agentrepl`
-- **Dependency:** built on `github.com/ikigenba/agentkit`.
+- **Dependency:** built on `github.com/ikigenba/agentkit`, including its per-model native reasoning introspection (each model's term, the values it accepts or its valid range, and its default) and its guarantee that a reasoning input a model does not understand is reported as a warning and falls back to that model's default. agentrepl requires both and reimplements neither — it renders what agentkit exposes.
 - **Config separator:** agentkit config settings are passed as `key=value` (an equals sign), with dotted keys mirroring agentkit's configuration structure.
 - **Credential variables:** one environment variable per provider, of the form `PROVIDER_API_KEY` — `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`.
 - **Session log location:** `~/.agentkit/<session-id>.jsonl`, one file per run.
@@ -58,6 +59,10 @@ These fixed, promised values the design must use verbatim and never re-declare:
 - **Pick any provider whose key is present; switch between them mid-conversation.** The operator selects Anthropic, Google (Gemini), OpenAI, or Z.ai and a model from agentkit's curated set, and can change that selection between turns with the conversation continuing coherently. A provider whose environment key is absent cannot be selected, and saying so is a clear message, not a crash.
 
 - **Z.ai is present but known-broken.** Z.ai is a selectable provider so its integration can be exercised, but it does not currently complete a conversation end-to-end; selecting it surfaces agentkit's failure cleanly rather than misbehaving. This is a known limitation, not a promise that Z.ai works in v1. Its API base URL is configurable through the config vocabulary (e.g. to target the GLM coding-plan endpoint), so alternate Z.ai endpoints can be exercised without rebuilding.
+
+- **Discover providers, models, and reasoning options without starting a session.** Running agentrepl's help prints a static catalog: every selectable provider in one list, the models available under each provider in another, and — for each model — its native reasoning term and the values it accepts (its discrete levels, or its valid token-budget range), as reported by agentkit rather than a uniform list repeated everywhere. The help checks no credentials and inspects no environment, so it shows what is possible to *request*; the runtime `/providers` command shows what is currently *usable* given the keys present.
+
+- **Set reasoning in the model's own terms; non-native input falls back, visibly.** The operator sets a model's reasoning using that model's native term and a value it accepts — the term and values `--help` lists for it (its discrete levels, or a token budget within its range). A value the model understands is honored exactly. A term or value the model does not understand — including a setting left over after switching models mid-conversation — is not silently misapplied: agentrepl prints agentkit's warning and the model's default reasoning is used instead. There is no cross-model translation; the operator always sees when their reasoning input was not honored and what was used in its place.
 
 - **Replies stream, and reasoning is visible.** The model's text appears incrementally as it is generated, and when a model emits reasoning, that reasoning is shown too — so the operator watches the turn unfold rather than waiting for a finished block.
 
@@ -80,11 +85,13 @@ These fixed, promised values the design must use verbatim and never re-declare:
 The verification gate runs the built agentrepl against exactly this list:
 
 - Launching agentrepl with a provider and model selected yields an interactive prompt; typing a message returns a coherent, streamed reply.
-- Every agentkit conversation setting can be set at launch via a `key=value` flag and adjusted at runtime via the matching slash-command using the same dotted key; the current configuration can be dumped on demand; an invalid key or value produces a clear, non-fatal error.
+- Every agentkit conversation setting can be set at launch via a `key=value` flag and adjusted at runtime via the matching slash-command using the same dotted key; the current configuration can be dumped on demand; an invalid key or value produces a clear, non-fatal error — except reasoning, whose non-native input warns and falls back to the model's default rather than erroring (see below).
 - The operator can select Anthropic, Google (Gemini), and OpenAI (each with its key present) and hold a working conversation against each.
 - The operator can change provider/model between turns and the conversation continues coherently against the newly selected provider/model, with prior history intact.
 - Selecting Z.ai is possible and surfaces agentkit's failure cleanly (Z.ai is not expected to complete a conversation in v1).
 - Selecting a provider whose environment key is absent produces a clear message and does not crash the REPL.
+- Running agentrepl's help prints, statically, the available providers in one list and the models grouped per provider in another, and for each model its native reasoning term and the values it accepts (its discrete levels, or its valid token-budget range); the help checks no credentials and does not reflect the current environment.
+- The operator can set a model's reasoning using that model's native term and an accepted value, and it is honored exactly; a term or value the model does not understand — including one carried over after a model switch — produces a warning and the model's default reasoning is applied, with agentrepl showing what was used instead, and there is no cross-model translation.
 - Replies are delivered incrementally, and when a model emits reasoning it is visible as the turn unfolds.
 - For a turn that uses tools, the operator can observe the model's tool-call request(s) with arguments and the tool result(s) fed back, and the loop completes to a final answer.
 - Each of the four built-in tools — `bash`, `read`, `write`, `edit` — can be invoked by the model and operates relative to agentrepl's current working directory.

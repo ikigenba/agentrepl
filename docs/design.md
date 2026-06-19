@@ -15,7 +15,11 @@ Shared facts every Decision leans on.
 
 - **Language / version:** Go 1.26.
 - **Module / repository path:** `github.com/ikigenba/agentrepl` (contractual; from product).
-- **Dependency:** built on `github.com/ikigenba/agentkit`; agentrepl drives `*agentkit.Conversation` directly.
+- **Dependency:** built on `github.com/ikigenba/agentkit`; agentrepl drives `*agentkit.Conversation` directly. It builds against the agentkit version that exports **native-per-model reasoning** (agentkit design D6 + D16); the older `v0.1.0` (universal `ReasoningEffort` enum) cannot satisfy this design. agentrepl consumes — and reimplements none of — this agentkit surface:
+  - **Native value carrier:** `agentkit.ReasoningValue` with constructors `Level(string)`, `Budget(int)`, `DisableReasoning()`; the zero value = unset → model default. It is **opaque** (unexported fields — *no read-back*), which is why config keeps a separate display string (Decision 3). `agentkit.GenSettings.Reasoning` is now a `ReasoningValue` (replacing the removed `ReasoningEffort` enum and its `EffortDefault…` constants).
+  - **Introspection (credential-blind):** `agentkit.ReasoningKind` (`ReasoningEnum` / `ReasoningRange` / `ReasoningToggle`), `agentkit.ReasoningSpec{Term, Kind, Levels, Min, Max, Sentinels, Default, CanDisable}`, `agentkit.Sentinel{Value, Meaning}`, and the interface `agentkit.ReasoningInspector{ ReasoningSpec(model) (ReasoningSpec, bool); SupportedReasoning() map[string]ReasoningSpec }`, implemented by per-sub-package package-level values `anthropic.Reasoning`, `google.Reasoning`, `openai.Reasoning`, `zai.Reasoning` (no `Provider` handle, no credentials, no network).
+  - **Warning surface:** `agentkit.Warning{Setting, Code, Detail}`, `agentkit.WarningCode` (`WarnReasoningUnsupported`, `WarnReasoningCannotDisable`, `WarnToolChoiceForced`, `WarnToolSchemaLossy`), read after a turn via `(*agentkit.Stream).Warnings() []Warning`.
+- **agentkit version pin is a plan/build obligation.** This is a **breaking** dependency move; `go.mod`'s `require` advances from `v0.1.0` to the agentkit minor that ships the surface above. Design fixes the *named API* (settled in agentkit's design); the *exact version string* is pinned in plan/build when agentkit tags the release, since it is not yet tagged.
 - **Binary entry point:** `cmd/agentrepl/main.go`, package `main` — the composition root only (parse flags, wire dependencies, run). All logic lives in `internal/` packages.
 - **Build / typecheck command:** `go build ./... && go vet ./...`.
 - **Test command:** `go test ./...`.
@@ -88,10 +92,11 @@ type Options struct {
 
 // Provider is one curated agentkit provider agentrepl can drive.
 type Provider struct {
-    Name   string       // "anthropic" | "google" | "openai" | "zai"
-    EnvKey string       // "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" | "OPENAI_API_KEY" | "ZAI_API_KEY"
-    Models []string     // curated model ids, referencing agentkit's exported constants
-    New    ProviderFunc // e.g. func(k string, o Options) agentkit.Provider { return anthropic.New(k) }
+    Name      string                      // "anthropic" | "google" | "openai" | "zai"
+    EnvKey    string                      // "ANTHROPIC_API_KEY" | "GEMINI_API_KEY" | "OPENAI_API_KEY" | "ZAI_API_KEY"
+    Models    []string                    // curated model ids, referencing agentkit's exported constants
+    New       ProviderFunc                // e.g. func(k string, o Options) agentkit.Provider { return anthropic.New(k) }
+    Reasoning agentkit.ReasoningInspector // the sub-package's credential-blind introspector: anthropic.Reasoning, …
 }
 
 // Default returns the built-in catalog of the four providers, in a stable order.
@@ -115,6 +120,7 @@ var (
 ```
 
 - `Default()`'s `Models` lists reference agentkit's exported model constants (`anthropic.ModelOpus48`, `google.ModelFlash25`, …), so the curated set is **enumerable** — for `/help`, model listings, and clear "choose from: …" errors — rather than hidden behind agentkit's unexported pricing registries.
+- **`Reasoning` carries the sub-package's credential-blind introspector** (`anthropic.Reasoning`, `google.Reasoning`, `openai.Reasoning`, `zai.Reasoning`), set in `Default()` alongside `New`. It is **not** the constructed `Provider` and needs no key — it is the single source the `--help` catalog (Decision 12) reads each model's native reasoning term/values from, so agentrepl embeds **zero** provider reasoning knowledge. (Config coercion in Decision 3 is deliberately model-blind and does **not** consult it; runtime display, if added, would.) The curated `Models` list and the inspector are kept honest together by the anti-drift test below: every curated id must resolve to a `ReasoningSpec` just as it must resolve to a `Pricing`.
 - The model is **pre-validated** against the mirrored `Models` list, giving an immediate, clear error before any turn. The list is kept honest by a mechanical **anti-drift test**: every curated model must be accepted by its constructed provider's `Pricing` — drift fails the suite rather than passing silently.
 - **Z.ai is an ordinary catalog entry** — present and constructible when `ZAI_API_KEY` is set. Its known-broken-ness is a turn-time failure surfaced cleanly by the error-handling decision, not a catalog special case.
 - **Provider-construction overrides ride on `Options`, not new catalog entries.** `Build` threads an `Options` into `New`; today only the `zai` entry consumes it, mapping a non-empty `Options.BaseURL` to agentkit's `zai.WithBaseURL(...)` option and otherwise leaving Z.ai's baked-in default root (`https://api.z.ai/api/paas/v4`). The other three entries ignore `Options`. This is the seam the `zai.base_url` config key (Decision 3) drives — e.g. to point Z.ai at its coding-plan endpoint `https://api.z.ai/api/coding/paas/v4` — keeping the "new knob = new key, no bespoke flag" promise and avoiding a per-endpoint catalog entry.
@@ -130,6 +136,8 @@ var (
 - R-OVEC-4AWS — `Default()` returns exactly the four providers `anthropic`, `google`, `openai`, `zai`, each carrying its contractual env key (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`).
 - R-S94E-8K1O — `Build` threads its `Options` into the provider constructor: a non-empty `Options.BaseURL` reaches the `zai` entry as `zai.WithBaseURL(...)` so the constructed Z.ai provider targets the override root, while an empty `Options.BaseURL` leaves the baked-in default and the other three entries ignore `Options`.
 - R-OWM8-I2NH — anti-drift: for every provider in `Default()`, every id in its `Models` list is accepted by the constructed provider's `Pricing(model)` (returns ok).
+- R-FQT4-7JCQ — `Default()` sets each provider's `Reasoning` to its sub-package introspector value (`anthropic.Reasoning`, `google.Reasoning`, `openai.Reasoning`, `zai.Reasoning`), non-nil and credential-blind (callable with no env key set).
+- R-FS10-LB3F — reasoning anti-drift: for every provider in `Default()`, every id in its `Models` list resolves to a `ReasoningSpec` via `p.Reasoning.ReasoningSpec(id)` (returns ok), so `--help` never renders a curated model with no reasoning descriptor.
 - R-OXU4-VUE6 — each provider's `Models` list is non-empty.
 - R-OZ21-9M4V — `Build` returns an error wrapping `ErrMissingKey` and naming the env var when `getenv` yields empty for the provider's key, and constructs nothing.
 - R-P09X-NDVK — `Build` returns a constructed `agentkit.Provider` (non-nil, no error) when the key is present.
@@ -144,10 +152,11 @@ package config
 
 // Target is what config reads and mutates.
 type Target struct {
-    Conv       *agentkit.Conversation
-    Catalog    []catalog.Provider
-    Getenv     func(string) string
-    ZaiBaseURL string // pending zai base-URL override; applied when zai is (re)built
+    Conv         *agentkit.Conversation
+    Catalog      []catalog.Provider
+    Getenv       func(string) string
+    ZaiBaseURL   string // pending zai base-URL override; applied when zai is (re)built
+    ReasoningRaw string // last raw gen.reasoning value, for display only (ReasoningValue is opaque); "" = unset
 }
 
 // Set applies one key=value to t, or returns a clear, wrapped error.
@@ -181,7 +190,7 @@ Internally a `map[string]field`, where `field` carries `set(t, raw) error` and `
 | `gen.temperature` | `Gen.Temperature` | `*float64` |
 | `gen.top_p` | `Gen.TopP` | `*float64` |
 | `gen.max_tokens` | `Gen.MaxTokens` | int |
-| `gen.reasoning` | `Gen.Reasoning` | enum: `off`/`minimal`/`low`/`medium`/`high`/`max`/`default` |
+| `gen.reasoning` | `Gen.Reasoning` (`agentkit.ReasoningValue`) + `Target.ReasoningRaw` | native value, shape-directed — see "Reasoning is the carve-out" below |
 | `retry.max_attempts` | `Retry.MaxAttempts` | int |
 | `retry.base_delay` | `Retry.BaseDelay` | duration (e.g. `500ms`) |
 | `retry.max_delay` | `Retry.MaxDelay` | duration |
@@ -190,11 +199,20 @@ Internally a `map[string]field`, where `field` carries `set(t, raw) error` and `
 | `tool_loop_limit` | `Conv.MaxToolIterations` | int |
 | `zai.base_url` | `Target.ZaiBaseURL` → `catalog.Options.BaseURL` for the `zai` build | URL string |
 
-- **Unset sentinel.** Setting the literal value `default` resets *any* key to its zero/unset state (nil pointer, `EffortDefault`, zero int/duration); `Dump`/`Get` render an unset key as `default`. One uniform rule, no per-key syntax.
+- **Unset sentinel.** Setting the literal value `default` resets *any* key to its zero/unset state (nil pointer, zero `ReasoningValue`, zero int/duration); `Dump`/`Get` render an unset key as `default`. One uniform rule, no per-key syntax.
 - **provider / model coupling** (loose, to avoid ordering deadlocks):
   - `provider=<name>` → catalog `Lookup` + `Build(getenv)`; sets `Conv.Provider`; surfaces `ErrUnknownProvider` / `ErrMissingKey` through `Set`; does not touch model.
   - `model=<id>` → if a provider is set, pre-validate with `HasModel` (clear `ErrUnknownModel` with "choose from: …"); else accept the string. The (provider, model) pair is ultimately validated by agentkit at `Send` and surfaced cleanly — a transient post-switch mismatch is a clear send-time error, never a crash.
 - **`zai.base_url` is a provider-construction override, applied through the catalog `Options` seam (Decision 2), and order-independent with `provider`.** A base URL is baked into the provider handle at construction, not a `Conversation` field, so the value is stored on `Target.ZaiBaseURL` and the `zai` provider is (re)built to apply it. `provider=zai` builds with `Options{BaseURL: t.ZaiBaseURL}`; setting `zai.base_url` while `zai` is already the active provider rebuilds it with the new root; setting it before any provider is selected just stores it for the eventual `zai` build — either order reaches the same state. `zai.base_url=default` clears the override (back to Z.ai's baked-in root) and rebuilds if zai is active. For a non-zai active provider the key is stored but not applied (a no-op against the live conversation until zai is selected).
+- **Reasoning is the carve-out: shape-directed, never model-validated in agentrepl, never a hard error.** `gen.reasoning` is the **one** key whose bad input does *not* return `ErrBadValue` (product success-criteria carve-out). Its `set` builds an `agentkit.ReasoningValue` from the raw string by **shape alone** — model-blind, so it works at launch before any model is selected and after a mid-conversation switch:
+  - raw (trim+lowercase) ∈ {`off`, `disable`, `disabled`} → `agentkit.DisableReasoning()`;
+  - raw parses as a base-10 integer, **including a leading `-`** (so sentinels like `-1`=dynamic and `0`=off pass) → `agentkit.Budget(n)`;
+  - otherwise → `agentkit.Level(raw)` **verbatim** — `"high"`, `"xhigh"`, `"minimal"`, and notably `"none"` (a real native effort level on gpt-5.x, **not** a disable token), passed through untouched.
+
+  The built value is assigned to `Conv.Gen.Reasoning` and the raw string is stored on `Target.ReasoningRaw` for display. agentrepl does **not** consult the active model's `ReasoningSpec` here and does **not** judge whether the value is native — that judgment, and the warn-and-default, are agentkit's at request-build time (D6), which is the only place the *currently-selected* model is authoritative (a value valid for model A may be invalid for model B after a switch). A non-native value is therefore accepted by `Set` without error, stored, and later **warned + defaulted** by agentkit, with agentrepl relaying the `Warning` (Decision 5). The sole `set`-time failure is a structurally unusable input (an empty value), which returns `ErrBadValue` like any key.
+  - **Display.** `Get`/`Dump` render `gen.reasoning` from `Target.ReasoningRaw` (the native string the operator gave), and an unset value (`ReasoningRaw == ""`) as `default` — the same uniform unset rendering every other key uses. **Runtime `/get`/`/dump` show only the current value (and `default` for unset); they deliberately do *not* reprint the active model's accepted-values catalog** — that discovery view is `--help`-only (Decision 12), keeping the runtime surface thin and matching the product, which mandates the catalog for `--help` alone. The native default *value* shown in `--help` comes from `spec.Default`, not from this field.
+  - **`default` resets it** to the unset `ReasoningValue` zero (model default) and clears `ReasoningRaw`, via the uniform unset rule above — no reasoning-specific syntax.
+  - Reasoning is **excluded from the generic invalid-value error coverage**: the generic error-path id asserts that path for every *other* key; reasoning's "no hard error on non-native input" is asserted by its own id below.
 - Both control surfaces share this one entrypoint: the `-c` flag does `ParsePair` then `Set`; `/set <key> <value>` calls `Set` directly; `/dump` calls `Dump`. Adding a key automatically reaches both surfaces.
 
 **Rejected.**
@@ -205,12 +223,15 @@ Internally a `map[string]field`, where `field` carries `set(t, raw) error` and `
 **Verification.**
 - R-LYK7-Y7ZS — every known key coerces its value to the correct typed `Target` field (table-driven across the full key list, including pointer, int, duration, bool, enum, and string kinds).
 - R-LZS4-BZQH — an unknown key returns a wrapped `ErrUnknownKey` naming the key and mutates nothing.
-- R-M100-PRH6 — an unparseable value returns a wrapped `ErrBadValue` naming the key and reason, and mutates nothing.
+- R-M100-PRH6 — an unparseable value returns a wrapped `ErrBadValue` naming the key and reason, and mutates nothing (every key **except** `gen.reasoning`, whose non-erroring carve-out is asserted separately below).
 - R-M27X-3J7V — the `default` value resets a pointer/enum key to unset, and `Dump`/`Get` then render it as `default`.
 - R-M3FT-HAYK — `provider=` constructs via the catalog and surfaces `ErrUnknownProvider`/`ErrMissingKey` through `Set`; `model=` pre-validates against the current provider with `ErrUnknownModel`.
 - R-M4NP-V2P9 — `Dump` returns all keys sorted as `key=value` lines reflecting current state.
 - R-M5VM-8UFY — flag/runtime parity: `ParsePair`+`Set` and a direct `Set` reach identical state for the same key and value.
 - R-SCS3-DV9R — setting `zai.base_url` stores the override on `Target` and, when `zai` is (or becomes) the active provider, the constructed Z.ai provider is built with that base URL via the catalog `Options` seam — reached identically whether `zai.base_url` is set before or after `provider=zai`; `zai.base_url=default` clears it and rebuilds against the baked-in root.
+- R-FZCE-VXJL — `gen.reasoning` builds the `ReasoningValue` shape-directed and model-blind: `off`/`disable`/`disabled` → `DisableReasoning()`; a base-10 integer including negatives (`-1`, `0`, `8000`) → `Budget(n)`; any other string (`high`, `xhigh`, `none`) → `Level(verbatim)`; the result is assigned to `Conv.Gen.Reasoning` and the raw string stored on `Target.ReasoningRaw`.
+- R-G0KB-9PAA — the reasoning carve-out: a non-native or unrecognized-vocabulary `gen.reasoning` value (e.g. a level on a budget model, or a made-up level) is accepted by `Set` **without** `ErrBadValue` and stored for agentkit to warn+default at turn time; only a structurally empty value errors.
+- R-G304-18RO — `Get`/`Dump` render `gen.reasoning` from `Target.ReasoningRaw` (the native string given), and as `default` when unset; setting `gen.reasoning=default` resets `Conv.Gen.Reasoning` to the zero `ReasoningValue` and clears `ReasoningRaw`.
 
 ## Decision 4 — CLI flags
 
@@ -233,11 +254,12 @@ func ParseArgs(name string, args []string, out io.Writer) (Options, error)
 |------|---------|
 | `-c key=value` | config passthrough; **repeatable** (a `flag.Value` slice), applied in encounter order at startup |
 | `-raw` | use the raw renderer; default is the decorated transcript |
-| `-h` / `-help` | usage (the `FlagSet`'s default) |
+| `-h` / `-help` | the **self-describing catalog** (Decision 12), not the bare `FlagSet` usage |
 
 Provider and model are **not** their own flags — they are `-c provider=… -c model=…`, keeping the "one config vocabulary, no bespoke flags" promise honest.
 
 - **`-c` is collected raw, validated at apply.** `ParseArgs` only gathers the strings; `Run` builds the `config.Target` and applies each via `config.ParsePair`+`config.Set` — one validation path shared with runtime `/set`.
+- **`-h`/`-help` is intercepted into the self-describing catalog.** `ParseArgs` overrides the `FlagSet`'s usage so that `-h`/`-help` writes the Decision 12 catalog to `out` and returns the sentinel `flag.ErrHelp`; the composition root treats that as a clean exit `0` and never starts the loop. The catalog is **credential-blind** — `ParseArgs` builds no `config.Target` and reads no env, so help runs with no keys set.
 - **A bad `-c` at launch is fatal** (clear stderr message, exit 1): an impossible initial state should stop, not start surprising. This is the deliberate asymmetry with runtime `/set`, which is non-fatal — and matches the exit taxonomy (startup vs in-loop).
 - **provider/model are optional at launch.** Starting bare is allowed; sending before they are set yields a clear "set a provider and model first" hint (the REPL pre-checks before `Send`), never a crash. Valid `-c provider/model` drops the operator straight into a usable conversation.
 
@@ -266,6 +288,7 @@ type Renderer interface {
     Event(ev agentkit.Event)                                     // each streamed event, in order
     Usage(turn agentkit.Usage, turnCost, total agentkit.Cost)    // per-turn usage/cost line
     Summary(total agentkit.Usage, totalCost agentkit.Cost)       // cumulative usage+cost block (/usage, on exit)
+    Warning(w agentkit.Warning)                                  // a setting agentkit could not honor as asked
     Error(err error)                                             // a failed turn or command
     Notice(line string)                                          // agentrepl info (e.g. /dump, hints)
 }
@@ -274,11 +297,13 @@ func NewDecorated(out io.Writer, color bool) Renderer
 func NewRaw(out io.Writer) Renderer
 ```
 
-**Turn driver** (`repl`): pre-check provider+model → `Prompt(text)` → `stream := conv.Send(ctx, text)` → range `stream.Events()` calling `Event(ev)` for each → after draining, if `ctx.Err() != nil` render an interrupt notice and exit (Decision 6); else if `stream.Err() != nil` call `Error(err)`; else call `Usage(stream.Usage(), stream.Cost(), conv.TotalCost())`. The `ctx` passed to `Send` is the SIGINT-cancellable context from Decision 6; the loop survives any non-interrupt turn error.
+**Turn driver** (`repl`): pre-check provider+model → `Prompt(text)` → `stream := conv.Send(ctx, text)` → range `stream.Events()` calling `Event(ev)` for each → after draining, if `ctx.Err() != nil` render an interrupt notice and exit (Decision 6); otherwise **relay any settings warnings first** — `for _, w := range stream.Warnings() { Warning(w) }` — then, if `stream.Err() != nil` call `Error(err)`, else call `Usage(stream.Usage(), stream.Cost(), conv.TotalCost())`. Warnings are rendered whether the turn then succeeds or errors, because they describe a setting that was not honored (most often reasoning: a non-native value carried in via the Decision 3 carve-out, which agentkit warned-and-defaulted), independent of turn outcome. The `ctx` passed to `Send` is the SIGINT-cancellable context from Decision 6; the loop survives any non-interrupt turn error.
 
-**decorated** (default): a distinct visual treatment per kind — `Prompt` ("you ›"), `TextDelta` streamed inline as the reply, `ReasoningDelta` dim/streamed, `ToolUse` labeled with name + arguments, `ToolResult` (error treatment when `IsError`), and a usage/cost line; `MessageDone` flushes a separator between messages in a tool loop. Exact glyphs/labels/ANSI codes are pinned by golden files under `testdata/`.
+**Warning relay is render-only.** agentrepl never mints, classifies, or suppresses a warning — it forwards each `agentkit.Warning` verbatim to the renderer. A `Warning` is **not** an `Error` (the turn was issued and, for the reasoning case, succeeds with the model's default); it gets its own kind so its treatment and placement (before the usage line) are distinct.
 
-**raw**: emits **one undecorated JSON line per committed entry** — `Prompt`, `MessageDone`, `ToolUse`, `ToolResult` — plus the usage line as JSON; **skips `TextDelta`/`ReasoningDelta`** (streaming fragments, not entries — and `MessageDone.Message` already carries the fully assembled text/reasoning blocks). Never emits ANSI. Marshals with `encoding/json`, yielding block shapes consistent with agentkit's own log (agentkit does no custom marshaling).
+**decorated** (default): a distinct visual treatment per kind — `Prompt` ("you ›"), `TextDelta` streamed inline as the reply, `ReasoningDelta` dim/streamed, `ToolUse` labeled with name + arguments, `ToolResult` (error treatment when `IsError`), `Warning` in a distinct warn style (e.g. `⚠ <Setting>: <Detail>`, separate from the error style), and a usage/cost line; `MessageDone` flushes a separator between messages in a tool loop. Exact glyphs/labels/ANSI codes are pinned by golden files under `testdata/`.
+
+**raw**: emits **one undecorated JSON line per committed entry** — `Prompt`, `MessageDone`, `ToolUse`, `ToolResult` — plus the usage line as JSON and **one JSON line per `Warning`** (the `agentkit.Warning` struct marshaled verbatim, carrying `Setting`/`Code`/`Detail`); **skips `TextDelta`/`ReasoningDelta`** (streaming fragments, not entries — and `MessageDone.Message` already carries the fully assembled text/reasoning blocks). Never emits ANSI. Marshals with `encoding/json`, yielding block shapes consistent with agentkit's own log (agentkit does no custom marshaling).
 
 **color**: the composition root computes `color = IO.IsTTY && Getenv("NO_COLOR") == ""` and passes it to `NewDecorated`. Raw is always colorless.
 
@@ -294,6 +319,9 @@ func NewRaw(out io.Writer) Renderer
 - R-LOX9-XVLT — raw emits exactly one undecorated JSON line per `Prompt`/`MessageDone`/`ToolUse`/`ToolResult` plus a usage line, skipping deltas; the output is valid JSONL with no ANSI.
 - R-LRD2-PF37 — a `ToolResult` with `IsError` gets the error treatment in decorated and preserves `IsError` in raw.
 - R-LSKZ-36TW — on a non-interrupt failed turn the driver calls `Error` (not `Usage`) and the loop continues to the next input.
+- R-G480-F0ID — after draining a turn's events, the driver calls `Renderer.Warning` once per entry in `stream.Warnings()`, before `Usage`/`Error`, and verbatim (the agentkit `Warning` is forwarded unmodified, never reclassified or suppressed); a turn with no warnings calls `Warning` zero times.
+- R-G5FW-SS92 — decorated renders a `Warning` in its own warn treatment, distinct from the `Error` treatment (golden); raw emits exactly one JSON line carrying the `Warning`'s `Setting`/`Code`/`Detail`.
+- R-G6NT-6JZR — a `gen.reasoning` value the selected model does not natively understand (the Decision 3 carve-out) produces an agentkit reasoning warning that the driver relays to the renderer, and the turn still completes with the model's default applied.
 
 ## Decision 6 — REPL lifecycle: exit, interrupt, and log integrity
 
@@ -511,7 +539,7 @@ Behavior:
 
 **Decision.** One resilience invariant governs the loop: **the only things that end it are `/exit`, `/quit`, EOF, and SIGINT.** No turn error, command error, config error, missing key, or non-terminal tool error ever stops the REPL. Expected failures are typed and *surfaced*; only genuine bugs (panics) and startup-fatal conditions stop the process.
 
-- **Turn errors.** After draining `stream.Events()`, if `ctx.Err() != nil` → interrupt path (Decision 6); else if `stream.Err() != nil` → `Renderer.Error(err)` and continue. agentkit's errors are already descriptive (`*agentkit.Error.Error()` carries provider/status/type); the decorated treatment shows the message in the error style, raw emits it as a JSON line. The session log independently captures agentkit's own `error` record, so failures are forensically preserved regardless of render mode.
+- **Turn errors.** After draining `stream.Events()`, if `ctx.Err() != nil` → interrupt path (Decision 6); else relay `stream.Warnings()` (Decision 5 — a warning is not an error and never ends or alters the loop), then if `stream.Err() != nil` → `Renderer.Error(err)` and continue. agentkit's errors are already descriptive (`*agentkit.Error.Error()` carries provider/status/type); the decorated treatment shows the message in the error style, raw emits it as a JSON line. The session log independently captures agentkit's own `error` record, so failures are forensically preserved regardless of render mode.
 - **Command / config / selection errors** (runtime) are rendered via `Renderer.Error`; the loop continues. This is where "a provider whose env key is absent produces a clear message and does not crash" lands: `catalog.ErrMissingKey` flows `/set provider …` → `config.Set` → `Renderer.Error`.
 - **Z.ai known-broken** needs no special case — selecting it succeeds (key present), and the send-time agentkit failure flows the ordinary turn-error path, surfaced cleanly, REPL stays usable.
 - **No panic recovery.** Per the project's principles ("fail loudly; crash over silent corruption"), agentrepl does not `recover`. Every *expected* condition — bad input, missing file, provider/network error, missing key, invalid config — is a typed error that gets surfaced; a panic means a real bug and should crash, not be masked.
@@ -529,8 +557,74 @@ Behavior:
 - R-HB5I-QYZH — in-loop errors are written to the renderer's `out` (stdout); startup-fatal errors go to stderr.
 - R-HCDF-4QQ6 — expected failure conditions (bad input, missing file, provider error, missing key, invalid config) are surfaced as rendered errors, never as a panic or process exit.
 
+## Decision 12 — The self-describing `--help` catalog
+
+**Decision.** `-h`/`-help` prints a **static, credential-blind catalog** sourced entirely from the curated catalog (Decision 2) and agentkit's per-package introspectors — never from constructed clients or the environment. It is the launch-time answer to the product's "discover providers, models, and reasoning options without starting a session." Rendering lives in `internal/repl` as a pure function over the catalog and an `io.Writer`; `ParseArgs` invokes it on the help flag (Decision 4) and the composition root exits `0`.
+
+```go
+package repl
+
+// WriteHelp renders the static catalog: a one-line usage, the launch flags, the
+// providers list, and the models-grouped-by-provider list with each model's
+// native reasoning term and accepted values. It reads only cat (no env, no
+// constructed providers), so it is credential-blind.
+func WriteHelp(out io.Writer, name string, cat []catalog.Provider)
+```
+
+Catalog shape (illustrative — exact bytes pinned by a golden file under `testdata/`):
+
+```
+usage: agentrepl [-c key=value ...] [-raw] [-h]
+
+flags:
+  -c key=value   set an agentkit config value (repeatable); see config keys via /help at runtime
+  -raw           emit the raw, undecorated message stream
+  -h, -help      show this catalog and exit
+
+providers:
+  anthropic   (ANTHROPIC_API_KEY)
+  google      (GEMINI_API_KEY)
+  openai      (OPENAI_API_KEY)
+  zai         (ZAI_API_KEY)
+
+models:
+  anthropic
+    claude-opus-4-8     effort: low, medium, high, xhigh, max  (default high)
+    claude-haiku-4-5    thinking budget: 1024–<max_tokens>  (default off)
+  google
+    gemini-2.5-flash    thinking budget: 0–24576  (0=off, -1=dynamic; default dynamic)
+    gemini-3.5-flash    thinking level: minimal, low, medium, high  (default medium)
+  openai
+    gpt-5.5             effort: none, low, medium, high, xhigh  (default medium)
+  zai
+    glm-5.2             effort: high, max  (default max)
+    glm-4.7             thinking: on/off  (default on)
+```
+
+- **One render routine keyed on `spec.Kind`** turns a `ReasoningSpec` into its values clause — no per-provider formatting:
+  - `ReasoningEnum` → `<Term>: <Levels joined ", ">  (default <level>)`.
+  - `ReasoningRange` → `<Term>: <Min>–<Max>` then any `Sentinels` as `(v=meaning, …; default <d>)`. The default is rendered from `spec.Default` in its native form (a budget int, a sentinel meaning, or `off` for a disabled default).
+  - `ReasoningToggle` → `<Term>: on/off  (default on|off)`.
+- **Reasoning facts come only from `p.Reasoning`** (the Decision 2 inspector). A model whose `ReasoningSpec(id)` returns `false` is rendered with a plain `(no reasoning control)` clause rather than omitted.
+- **Default value rendering reuses the same native formatter** the config display side uses (Decision 3), so `--help` and `/get` describe a model's default identically.
+- **Provider order and model grouping follow `catalog.Default()`'s stable order** — the catalog owns display order; the renderer does not sort.
+- **Strictly credential-blind:** `WriteHelp` takes the catalog and writes text; it never calls `Build`, `Getenv`, or any provider constructor. The env-key name in parens is the catalog's `EnvKey` *string*, printed as documentation, not a presence check — that live view is `/providers` (Decision 9).
+
+**Rejected.**
+- **The bare `flag.FlagSet` usage** (the prior decision) — lists no providers, models, or reasoning; leaves the product's self-describing-help promise unmet.
+- **Sourcing reasoning from a constructed provider / `SupportedReasoning()` on a handle** — would need a key just to print static metadata; the credential-blind package-level inspector exists precisely to avoid this.
+- **Per-provider format branches** — reintroduces the provider knowledge the thin-consumer principle forbids; a single `Kind`-keyed routine renders all three shapes.
+- **Hardcoding the reasoning text in agentrepl** — drifts from agentkit the moment a model's vocabulary changes; reading `ReasoningSpec` at print time keeps display and acceptance from one source.
+
+**Verification.**
+- R-FT8W-Z2U4 — `-h`/`-help` writes the catalog to `out` and exits `0` without starting the REPL loop, and does so with **no** environment variables set and **no** provider constructed (credential-blind).
+- R-FUGT-CUKT — the catalog lists every provider from `catalog.Default()` and, grouped under each, every curated model id, in `Default()`'s order.
+- R-FVOP-QMBI — each model's reasoning clause is rendered from its `ReasoningSpec` by `Kind`: an enum model shows `Term` + its `Levels` + native default; a range model shows `Term` + `Min`–`Max` + sentinel meanings + native default; a toggle model shows `Term` + `on/off` + default (golden-pinned across all three kinds).
+- R-FWWM-4E27 — a model whose inspector returns `ReasoningSpec(id) == (_, false)` renders a `(no reasoning control)` clause and is not dropped from the listing.
+- R-FY4I-I5SW — `WriteHelp` performs no env read and constructs no provider (asserted by passing a catalog whose `New`/`Getenv` would record or panic if called), proving the help path cannot depend on credentials.
+
 ## Status
 
-Decided: Decisions 1–11 — package layout & seams; provider & model catalog; config-key namespace & coercion; CLI flags; turn execution & rendering; REPL lifecycle, interrupt & log integrity; usage & cost reporting; session log & session-id; slash-command dispatch & command set; built-in tools; error handling & REPL resilience.
+Decided: Decisions 1–12 — package layout & seams; provider & model catalog; config-key namespace & coercion; CLI flags; turn execution & rendering; REPL lifecycle, interrupt & log integrity; usage & cost reporting; session log & session-id; slash-command dispatch & command set; built-in tools; error handling & REPL resilience; the self-describing `--help` catalog.
 
 The seams, public interfaces, naming, struct/type definitions, data model, and the testing approach are fully decided. The construction order that realizes this design lives in the plan.
