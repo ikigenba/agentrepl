@@ -10,6 +10,8 @@ import (
 	"github.com/ikigenba/agentrepl/internal/catalog"
 )
 
+const reasoningConfigKey = "gen.reasoning"
+
 // WriteHelp renders the static launch-time catalog.
 func WriteHelp(out io.Writer, name string, cat []catalog.Provider) {
 	fmt.Fprintf(out, "usage: %s [-c key=value ...] [-raw] [-h]\n\n", name)
@@ -44,20 +46,19 @@ func reasoningClause(provider catalog.Provider, model string) string {
 	}
 	switch spec.Kind {
 	case agentkit.ReasoningEnum:
-		return fmt.Sprintf("%s: %s  (default %s)", spec.Term, strings.Join(spec.Levels, ", "), formatReasoningDefault(spec))
+		return fmt.Sprintf("%s={%s}  (%s; default %s)", reasoningConfigKey, strings.Join(spec.Levels, "|"), spec.Term, formatReasoningDefault(spec))
 	case agentkit.ReasoningRange:
-		clause := fmt.Sprintf("%s: %d–%d", spec.Term, spec.Min, spec.Max)
+		clause := fmt.Sprintf("%s=<%d–%d>", reasoningConfigKey, spec.Min, spec.Max)
 		if len(spec.Sentinels) == 0 {
-			return clause + fmt.Sprintf("  (default %s)", formatReasoningDefault(spec))
+			return clause + fmt.Sprintf("  (%s; default %s)", spec.Term, formatReasoningDefault(spec))
 		}
-		parts := make([]string, 0, len(spec.Sentinels)+1)
+		parts := make([]string, 0, len(spec.Sentinels))
 		for _, sentinel := range spec.Sentinels {
 			parts = append(parts, fmt.Sprintf("%d=%s", sentinel.Value, sentinel.Meaning))
 		}
-		parts = append(parts, "default "+formatReasoningDefault(spec))
-		return clause + "  (" + strings.Join(parts, ", ") + ")"
+		return clause + fmt.Sprintf("  (%s; %s; default %s)", spec.Term, strings.Join(parts, ", "), formatReasoningDefault(spec))
 	case agentkit.ReasoningToggle:
-		return fmt.Sprintf("%s: on/off  (default %s)", spec.Term, formatReasoningDefault(spec))
+		return fmt.Sprintf("%s={on|off}  (%s; default %s)", reasoningConfigKey, spec.Term, formatReasoningDefault(spec))
 	default:
 		return "(no reasoning control)"
 	}

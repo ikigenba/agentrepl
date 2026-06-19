@@ -566,8 +566,10 @@ package repl
 
 // WriteHelp renders the static catalog: a one-line usage, the launch flags, the
 // providers list, and the models-grouped-by-provider list with each model's
-// native reasoning term and accepted values. It reads only cat (no env, no
-// constructed providers), so it is credential-blind.
+// reasoning shown as the literal `gen.reasoning=<…>` config key and accepted
+// values in traditional CLI syntax (the native term kept as a trailing
+// parenthetical). It reads only cat (no env, no constructed providers), so it
+// is credential-blind.
 func WriteHelp(out io.Writer, name string, cat []catalog.Provider)
 ```
 
@@ -589,22 +591,23 @@ providers:
 
 models:
   anthropic
-    claude-opus-4-8     effort: low, medium, high, xhigh, max  (default high)
-    claude-haiku-4-5    thinking budget: 1024–<max_tokens>  (default off)
+    claude-opus-4-8     gen.reasoning={low|medium|high|xhigh|max}   (effort; default high)
+    claude-haiku-4-5    gen.reasoning=<1024–max_tokens>             (thinking budget; default off)
   google
-    gemini-2.5-flash    thinking budget: 0–24576  (0=off, -1=dynamic; default dynamic)
-    gemini-3.5-flash    thinking level: minimal, low, medium, high  (default medium)
+    gemini-2.5-flash    gen.reasoning=<0–24576>                     (thinking budget; 0=off, -1=dynamic; default dynamic)
+    gemini-3.5-flash    gen.reasoning={minimal|low|medium|high}     (thinking level; default medium)
   openai
-    gpt-5.5             effort: none, low, medium, high, xhigh  (default medium)
+    gpt-5.5             gen.reasoning={none|low|medium|high|xhigh}  (effort; default medium)
   zai
-    glm-5.2             effort: high, max  (default max)
-    glm-4.7             thinking: on/off  (default on)
+    glm-5.2             gen.reasoning={high|max}                    (effort; default max)
+    glm-4.7             gen.reasoning={on|off}                      (thinking; default on)
 ```
 
-- **One render routine keyed on `spec.Kind`** turns a `ReasoningSpec` into its values clause — no per-provider formatting:
-  - `ReasoningEnum` → `<Term>: <Levels joined ", ">  (default <level>)`.
-  - `ReasoningRange` → `<Term>: <Min>–<Max>` then any `Sentinels` as `(v=meaning, …; default <d>)`. The default is rendered from `spec.Default` in its native form (a budget int, a sentinel meaning, or `off` for a disabled default).
-  - `ReasoningToggle` → `<Term>: on/off  (default on|off)`.
+- **The key, not the term, leads each row.** Every model's reasoning line is labeled with the literal config key `gen.reasoning=` — byte-identical across all models and providers — followed by its accepted values in **traditional CLI syntax**: braces `{a|b|c}` for an enumerated choice, angle brackets `<…>` for a free numeric value. A reader copies the exact `-c gen.reasoning=<value>` terminology straight off the row, the same way the `providers:`/`models:` section labels telegraph the `provider`/`model` keys. The native term (`effort`, `thinking budget`, `thinking level`, `thinking`) is retained only as parenthetical context, never as the label — removing the mismatch that made the term look like a settable key (`thinking budget:` reading as a `thinking` key).
+- **One render routine keyed on `spec.Kind`** turns a `ReasoningSpec` into its clause — the constant `gen.reasoning=` key prefix, the values group, then a trailing parenthetical carrying the native `Term`, any sentinels, and the default — no per-provider formatting:
+  - `ReasoningEnum` → `gen.reasoning={<Levels joined "|">}  (<Term>; default <level>)`.
+  - `ReasoningRange` → `gen.reasoning=<<Min>–<Max>>` then any `Sentinels` and the default in the parenthetical: `(<Term>; v=meaning, …; default <d>)`. The default is rendered from `spec.Default` in its native form (a budget int, a sentinel meaning, or `off` for a disabled default).
+  - `ReasoningToggle` → `gen.reasoning={on|off}  (<Term>; default on|off)`.
 - **Reasoning facts come only from `p.Reasoning`** (the Decision 2 inspector). A model whose `ReasoningSpec(id)` returns `false` is rendered with a plain `(no reasoning control)` clause rather than omitted.
 - **Default value rendering reuses the same native formatter** the config display side uses (Decision 3), so `--help` and `/get` describe a model's default identically.
 - **Provider order and model grouping follow `catalog.Default()`'s stable order** — the catalog owns display order; the renderer does not sort.
@@ -615,11 +618,14 @@ models:
 - **Sourcing reasoning from a constructed provider / `SupportedReasoning()` on a handle** — would need a key just to print static metadata; the credential-blind package-level inspector exists precisely to avoid this.
 - **Per-provider format branches** — reintroduces the provider knowledge the thin-consumer principle forbids; a single `Kind`-keyed routine renders all three shapes.
 - **Hardcoding the reasoning text in agentrepl** — drifts from agentkit the moment a model's vocabulary changes; reading `ReasoningSpec` at print time keeps display and acceptance from one source.
+- **Labeling the row with the native term** (`effort:`, `thinking budget:`) — the term coincides with no config key, so a reader types `-c thinking=12000` and gets `unknown config key`; the row must carry the actual key.
+- **A single header line naming the key once** (`models:  (set with -c gen.reasoning=<value>)`) — forces the reader to assemble the key from a distant header and the values from the row; each row should be independently copy-pasteable.
 
 **Verification.**
 - R-FT8W-Z2U4 — `-h`/`-help` writes the catalog to `out` and exits `0` without starting the REPL loop, and does so with **no** environment variables set and **no** provider constructed (credential-blind).
 - R-FUGT-CUKT — the catalog lists every provider from `catalog.Default()` and, grouped under each, every curated model id, in `Default()`'s order.
-- R-FVOP-QMBI — each model's reasoning clause is rendered from its `ReasoningSpec` by `Kind`: an enum model shows `Term` + its `Levels` + native default; a range model shows `Term` + `Min`–`Max` + sentinel meanings + native default; a toggle model shows `Term` + `on/off` + default (golden-pinned across all three kinds).
+- R-FVOP-QMBI — each model's accepted-values group is rendered from its `ReasoningSpec` by `Kind`: an enum model shows its `Levels`, a range model shows `Min`–`Max` plus sentinel meanings, a toggle model shows `on`/`off`; each carries its native default and the native `Term` in the trailing parenthetical (golden-pinned across all three kinds).
+- R-6DEO-9TXQ — every model row leads with the literal config key `gen.reasoning=` (byte-identical across all models and providers) followed by its values in traditional CLI syntax — `{a|b|c}` for enum/toggle, `<…>` for a range — so the row is copy-pasteable as `-c gen.reasoning=<value>`; the native term appears only in the parenthetical, never as the label.
 - R-FWWM-4E27 — a model whose inspector returns `ReasoningSpec(id) == (_, false)` renders a `(no reasoning control)` clause and is not dropped from the listing.
 - R-FY4I-I5SW — `WriteHelp` performs no env read and constructs no provider (asserted by passing a catalog whose `New`/`Getenv` would record or panic if called), proving the help path cannot depend on credentials.
 

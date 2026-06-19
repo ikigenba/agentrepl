@@ -92,7 +92,7 @@ func TestParseArgsHelpWritesCatalogAndReturnsErrHelpCredentialBlind(t *testing.T
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("ParseArgs(-h) error = %v, want flag.ErrHelp", err)
 	}
-	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)", "test-model", "effort: low, high  (default high)"} {
+	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)", "test-model", "gen.reasoning={low|high}  (effort; default high)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("help output = %q, want %q", out.String(), want)
 		}
@@ -142,6 +142,7 @@ func TestWriteHelpListsDefaultCatalogInOrder(t *testing.T) {
 
 func TestWriteHelpGoldenReasoningClausesByKind(t *testing.T) {
 	// R-FVOP-QMBI
+	// R-6DEO-9TXQ
 	cat := []catalog.Provider{
 		{
 			Name:   "enum",
