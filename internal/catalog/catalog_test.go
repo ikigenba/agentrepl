@@ -76,6 +76,49 @@ func TestDefaultModelsAreAcceptedByConstructedProviderPricing(t *testing.T) {
 	}
 }
 
+func TestDefaultProvidersSetCredentialBlindReasoningInspectors(t *testing.T) {
+	// R-FQT4-7JCQ
+	want := map[string]agentkit.ReasoningInspector{
+		"anthropic": anthropic.Reasoning,
+		"google":    google.Reasoning,
+		"openai":    openai.Reasoning,
+		"zai":       zai.Reasoning,
+	}
+	for _, provider := range Default() {
+		if provider.Reasoning == nil {
+			t.Fatalf("%s Reasoning is nil", provider.Name)
+		}
+		if provider.Reasoning != want[provider.Name] {
+			t.Fatalf("%s Reasoning = %#v, want its package introspector", provider.Name, provider.Reasoning)
+		}
+		spec, ok := provider.Reasoning.ReasoningSpec(provider.Models[0])
+		if !ok {
+			t.Fatalf("%s ReasoningSpec(%q) ok=false", provider.Name, provider.Models[0])
+		}
+		if spec.Term == "" {
+			t.Fatalf("%s ReasoningSpec(%q).Term is empty", provider.Name, provider.Models[0])
+		}
+	}
+}
+
+func TestDefaultModelsResolveReasoningSpecs(t *testing.T) {
+	// R-FS10-LB3F
+	for _, provider := range Default() {
+		if provider.Reasoning == nil {
+			t.Fatalf("%s Reasoning is nil", provider.Name)
+		}
+		for _, model := range provider.Models {
+			spec, ok := provider.Reasoning.ReasoningSpec(model)
+			if !ok {
+				t.Fatalf("%s ReasoningSpec(%q) ok=false", provider.Name, model)
+			}
+			if spec.Term == "" {
+				t.Fatalf("%s ReasoningSpec(%q).Term is empty", provider.Name, model)
+			}
+		}
+	}
+}
+
 func TestBuildMissingKeyWrapsSentinelNamesEnvAndDoesNotConstruct(t *testing.T) {
 	// R-OZ21-9M4V
 	calls := 0

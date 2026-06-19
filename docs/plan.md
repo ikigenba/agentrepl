@@ -130,7 +130,7 @@ This is the **atomic dependency move**, the agentrepl mirror of agentkit's Phase
 
 **Done when:** R-FZCE-VXJL (shape-directed, model-blind coercion assigning `Conv.Gen.Reasoning` and storing `ReasoningRaw`), R-G0KB-9PAA (the carve-out: a non-native value is accepted without `ErrBadValue` and stored, only a structurally empty value errors), and R-G304-18RO (`Get`/`Dump` render from `ReasoningRaw`, `default` resets the value and clears the raw) are covered by clearly-named tests; the previously-green full-key-list ids still pass under the native shape (R-M100-PRH6 now excluding `gen.reasoning`); and the suite is green.
 
-### Phase 12 — Catalog reasoning introspector field · ⬜ not started
+### Phase 12 — Catalog reasoning introspector field · ✅ done
 
 *Realizes design Decision 2 (the `Reasoning agentkit.ReasoningInspector` field and its anti-drift). Depends on Phase 2 (catalog) and Phase 11 (the agentkit pin that exports `ReasoningInspector` and the per-sub-package `Reasoning` values).*
 

@@ -18,10 +18,11 @@ type Options struct {
 }
 
 type Provider struct {
-	Name   string
-	EnvKey string
-	Models []string
-	New    ProviderFunc
+	Name      string
+	EnvKey    string
+	Models    []string
+	New       ProviderFunc
+	Reasoning agentkit.ReasoningInspector
 }
 
 var (
@@ -43,6 +44,7 @@ func Default() []Provider {
 			New: func(apiKey string, _ Options) agentkit.Provider {
 				return anthropic.New(apiKey)
 			},
+			Reasoning: anthropic.Reasoning,
 		},
 		{
 			Name:   "google",
@@ -57,6 +59,7 @@ func Default() []Provider {
 			New: func(apiKey string, _ Options) agentkit.Provider {
 				return google.New(apiKey)
 			},
+			Reasoning: google.Reasoning,
 		},
 		{
 			Name:   "openai",
@@ -71,6 +74,7 @@ func Default() []Provider {
 			New: func(apiKey string, _ Options) agentkit.Provider {
 				return openai.New(apiKey)
 			},
+			Reasoning: openai.Reasoning,
 		},
 		{
 			Name:   "zai",
@@ -87,6 +91,7 @@ func Default() []Provider {
 				}
 				return zai.New(apiKey)
 			},
+			Reasoning: zai.Reasoning,
 		},
 	}
 }
