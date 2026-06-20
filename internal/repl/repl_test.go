@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"iter"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -529,7 +528,7 @@ func TestWaiterStopsByDeferForErrorEmptyAndInterrupt(t *testing.T) {
 			name: "empty",
 			run: func(t *testing.T, calls *[]string) *state {
 				t.Helper()
-				empty := agentkit.NewRoundTrip(nil, agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, nil)
+				empty := agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, nil)
 				state := newWaiterTestState(calls, newScriptedProvider(empty))
 				handleTurn(context.Background(), state, "hello")
 				return state
@@ -1239,7 +1238,7 @@ func (p *interruptProvider) RoundTrip(ctx context.Context, req *agentkit.Request
 	}
 	close(p.interruptStarted)
 	<-ctx.Done()
-	return agentkit.NewRoundTrip(nil, agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{
+	return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{
 		InputUncached: 999,
 		Output:        999,
 		Total:         1998,
@@ -1271,7 +1270,7 @@ func newBlockingProvider() *blockingProvider {
 func (p *blockingProvider) RoundTrip(ctx context.Context, _ *agentkit.Request) *agentkit.RoundTrip {
 	close(p.started)
 	<-ctx.Done()
-	return agentkit.NewRoundTrip(nil, agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, ctx.Err())
+	return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, ctx.Err())
 }
 
 func (p *blockingProvider) Name() string {
@@ -1293,7 +1292,7 @@ func successRound(text string, usage agentkit.Usage) *agentkit.RoundTrip {
 		Role:   agentkit.RoleAssistant,
 		Blocks: []agentkit.Block{agentkit.TextBlock{Text: text}},
 	}
-	return agentkit.NewRoundTrip(eventSeq(agentkit.TextDelta{Text: text}), message, agentkit.FinishStop, usage, nil, nil)
+	return agentkit.NewRoundTrip(message, agentkit.FinishStop, usage, nil, nil)
 }
 
 func toolUseRound() *agentkit.RoundTrip {
@@ -1309,21 +1308,11 @@ func toolUseRoundWithWarnings(warnings []agentkit.Warning) *agentkit.RoundTrip {
 			Input: json.RawMessage(`{"path":"missing.txt"}`),
 		}},
 	}
-	return agentkit.NewRoundTrip(nil, message, agentkit.FinishToolUse, usageOne(), warnings, nil)
+	return agentkit.NewRoundTrip(message, agentkit.FinishToolUse, usageOne(), warnings, nil)
 }
 
 func errorRound(message string) *agentkit.RoundTrip {
-	return agentkit.NewRoundTrip(nil, agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, errors.New(message))
-}
-
-func eventSeq(events ...agentkit.Event) iter.Seq[agentkit.Event] {
-	return func(yield func(agentkit.Event) bool) {
-		for _, ev := range events {
-			if !yield(ev) {
-				return
-			}
-		}
-	}
+	return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, errors.New(message))
 }
 
 func usageOne() agentkit.Usage {
@@ -1361,7 +1350,7 @@ func (p *reasoningWarningProvider) RoundTrip(_ context.Context, req *agentkit.Re
 		Code:    agentkit.WarnReasoningUnsupported,
 		Detail:  "xhigh is not supported by test-model; using high",
 	}}
-	return agentkit.NewRoundTrip(eventSeq(agentkit.TextDelta{Text: "defaulted"}), message, agentkit.FinishStop, usageOne(), warnings, nil)
+	return agentkit.NewRoundTrip(message, agentkit.FinishStop, usageOne(), warnings, nil)
 }
 
 func (p *reasoningWarningProvider) Name() string {

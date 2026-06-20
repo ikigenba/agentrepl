@@ -5,6 +5,8 @@ assistant › Hi there
 
 tool call › read {"path":"missing.txt"}
 
+tool result › read: inline contents
+
 tool result › read: contents
 
 tool error › read: open missing.txt: no such file

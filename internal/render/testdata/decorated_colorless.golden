@@ -1,4 +1,6 @@
 you › 
+reasoning › thinking
+
 assistant › Hi
 
 tool call › read {"path":"ok.txt"}

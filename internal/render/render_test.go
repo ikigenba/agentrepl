@@ -18,6 +18,8 @@ import (
 var update = flag.Bool("update", false, "update golden files")
 
 func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *testing.T) {
+	// R-CCHP-S6AJ
+	// R-CDPM-5Y18
 	// R-LL9K-SKDQ
 	// R-LRD2-PF37
 	// R-JFBW-TYU8
@@ -28,11 +30,18 @@ func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *
 
 	render.Prompt()
 	render.Input("hello")
-	render.Event(agentkit.ReasoningDelta{Text: "checking"})
-	render.Event(agentkit.MessageDone{})
-	render.Event(agentkit.TextDelta{Text: "Hi there"})
-	render.Event(agentkit.MessageDone{})
 	render.Event(agentkit.ToolUse{ID: "toolu_1", Name: "read", Input: json.RawMessage(`{"path":"missing.txt"}`)})
+	render.Event(agentkit.MessageDone{Message: agentkit.Message{
+		Role: agentkit.RoleAssistant,
+		Blocks: []agentkit.Block{
+			agentkit.ReasoningBlock{Summary: ""},
+			agentkit.ReasoningBlock{Summary: "checking\n\n"},
+			agentkit.TextBlock{},
+			agentkit.TextBlock{Text: "Hi there\n"},
+			agentkit.ToolUseBlock{ID: "toolu_1", Name: "read", Input: json.RawMessage(`{"path":"missing.txt"}`)},
+			agentkit.ToolResultBlock{ToolUseID: "toolu_inline", Name: "read", Content: "inline contents\n\n"},
+		},
+	}})
 	render.Event(agentkit.ToolResult{ID: "toolu_1", Name: "read", Output: "contents\n"})
 	render.Event(agentkit.ToolResult{ID: "toolu_2", Name: "read", Output: "open missing.txt: no such file", IsError: true})
 	render.Usage(turnUsage(), agentkit.Cost(1_234_000), agentkit.Cost(5_678_000))
@@ -45,6 +54,7 @@ func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *
 		"reasoning › checking",
 		"assistant › Hi there",
 		`tool call › read {"path":"missing.txt"}`,
+		"tool result › read: inline contents",
 		"tool result › read: contents",
 		"tool error › read: open missing.txt: no such file",
 		"summary",
@@ -53,6 +63,9 @@ func TestDecoratedGoldenRendersKindsWithoutInputEchoSeparatorsOrPerTurnUsage(t *
 		if !strings.Contains(got, want) {
 			t.Fatalf("decorated output missing %q:\n%s", want, got)
 		}
+	}
+	if count := strings.Count(got, `tool call › read {"path":"missing.txt"}`); count != 1 {
+		t.Fatalf("decorated tool call count = %d, want exactly once from ToolUseBlock:\n%s", count, got)
 	}
 	for _, notWant := range []string{"you › hello", "─", "$0.001234 turn"} {
 		if strings.Contains(got, notWant) {
@@ -99,25 +112,23 @@ func TestDecoratedTTYPromptGoldenAndInputNoEcho(t *testing.T) {
 	}
 }
 
-func TestDecoratedStreamsDeltasIncrementally(t *testing.T) {
-	// R-LMHH-6C4F
+func TestDecoratedMessageDoneSkipsEmptyBlocks(t *testing.T) {
+	// R-CCHP-S6AJ
+	// R-Q52T-PXCR
 	var buf bytes.Buffer
 	render := NewDecorated(&buf, false, false)
 
-	render.Event(agentkit.TextDelta{Text: "Hel"})
-	if got := buf.String(); got != "assistant › Hel" {
-		t.Fatalf("after first TextDelta = %q, want bytes written immediately", got)
-	}
-	render.Event(agentkit.TextDelta{Text: "lo"})
-	if got := buf.String(); got != "assistant › Hello" {
-		t.Fatalf("after second TextDelta = %q, want appended bytes", got)
-	}
-
-	buf.Reset()
-	render = NewDecorated(&buf, false, false)
-	render.Event(agentkit.ReasoningDelta{Text: "check"})
-	if got := buf.String(); got != "reasoning › check" {
-		t.Fatalf("after ReasoningDelta = %q, want bytes written immediately", got)
+	render.Event(agentkit.MessageDone{Message: agentkit.Message{
+		Role: agentkit.RoleAssistant,
+		Blocks: []agentkit.Block{
+			agentkit.ReasoningBlock{},
+			agentkit.TextBlock{Text: "\n"},
+			agentkit.ToolUseBlock{},
+			agentkit.TextBlock{Text: "visible"},
+		},
+	}})
+	if got := buf.String(); got != "assistant › visible\n" {
+		t.Fatalf("decorated empty block output = %q, want only non-empty text with no leading blank", got)
 	}
 }
 
@@ -127,8 +138,14 @@ func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 	var color bytes.Buffer
 	colorRender := NewDecorated(&color, true, true)
 	colorRender.Prompt()
-	colorRender.Event(agentkit.TextDelta{Text: "Hi"})
-	colorRender.Event(agentkit.ToolUse{Name: "read", Input: json.RawMessage(`{"path":"ok.txt"}`)})
+	colorRender.Event(agentkit.MessageDone{Message: agentkit.Message{
+		Role: agentkit.RoleAssistant,
+		Blocks: []agentkit.Block{
+			agentkit.ReasoningBlock{Summary: "thinking"},
+			agentkit.TextBlock{Text: "Hi"},
+			agentkit.ToolUseBlock{Name: "read", Input: json.RawMessage(`{"path":"ok.txt"}`)},
+		},
+	}})
 	colorRender.Event(agentkit.ToolResult{Name: "read", Output: "ok"})
 	colorRender.Event(agentkit.ToolResult{Name: "read", Output: "missing", IsError: true})
 	colorRender.Error(assertErr("boom"))
@@ -139,6 +156,7 @@ func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 	}
 	for _, want := range []string{
 		"\x1b[1myou ›\x1b[0m",
+		"\x1b[2mreasoning › thinking\x1b[0m",
 		"\x1b[1m\x1b[94massistant ›\x1b[0m \x1b[94mHi",
 		"\x1b[90mtool call › read {\"path\":\"ok.txt\"}\x1b[0m",
 		"\x1b[90mtool result › read: ok\x1b[0m",
@@ -153,8 +171,14 @@ func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 	var plain bytes.Buffer
 	plainRender := NewDecorated(&plain, false, true)
 	plainRender.Prompt()
-	plainRender.Event(agentkit.TextDelta{Text: "Hi"})
-	plainRender.Event(agentkit.ToolUse{Name: "read", Input: json.RawMessage(`{"path":"ok.txt"}`)})
+	plainRender.Event(agentkit.MessageDone{Message: agentkit.Message{
+		Role: agentkit.RoleAssistant,
+		Blocks: []agentkit.Block{
+			agentkit.ReasoningBlock{Summary: "thinking"},
+			agentkit.TextBlock{Text: "Hi"},
+			agentkit.ToolUseBlock{Name: "read", Input: json.RawMessage(`{"path":"ok.txt"}`)},
+		},
+	}})
 	plainRender.Event(agentkit.ToolResult{Name: "read", Output: "ok"})
 	plainRender.Event(agentkit.ToolResult{Name: "read", Output: "missing", IsError: true})
 	plainRender.Error(assertErr("boom"))
@@ -165,8 +189,9 @@ func TestDecoratedColorIsControlledByConstructorFlag(t *testing.T) {
 	assertGolden(t, "decorated_colorless.golden", plain.String())
 }
 
-func TestRawJSONLGoldenSkipsDeltasAndCarriesUsageSummaryAndToolErrors(t *testing.T) {
+func TestRawJSONLGoldenCarriesPromptEventsUsageSummaryAndToolErrors(t *testing.T) {
 	// R-LOX9-XVLT
+	// R-CDPM-5Y18
 	// R-LRD2-PF37
 	// R-ONJY-6PJG
 	// R-OORU-KHA5
@@ -176,9 +201,10 @@ func TestRawJSONLGoldenSkipsDeltasAndCarriesUsageSummaryAndToolErrors(t *testing
 	render := NewRaw(&buf)
 
 	render.Prompt()
+	if buf.Len() != 0 {
+		t.Fatalf("raw Prompt output = %q, want empty", buf.String())
+	}
 	render.Input("hello")
-	render.Event(agentkit.TextDelta{Text: "ignored"})
-	render.Event(agentkit.ReasoningDelta{Text: "ignored"})
 	render.Event(agentkit.MessageDone{Message: agentkit.Message{
 		Role: agentkit.RoleAssistant,
 		Blocks: []agentkit.Block{

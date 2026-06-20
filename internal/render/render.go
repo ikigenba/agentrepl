@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,13 +154,11 @@ type decoratedRenderer struct {
 	out        io.Writer
 	color      bool
 	tty        bool
-	streaming  bool
 	drewBlock  bool
 	lastPrompt bool
 }
 
 func (r *decoratedRenderer) Prompt() {
-	r.finishStream()
 	if !r.tty {
 		return
 	}
@@ -172,35 +171,13 @@ func (r *decoratedRenderer) Input(string) {
 
 func (r *decoratedRenderer) Event(ev agentkit.Event) {
 	switch ev := ev.(type) {
-	case agentkit.TextDelta:
-		if !r.streaming {
-			r.startBlock(false)
-			fmt.Fprintf(r.out, "%s%sassistant ›%s %s", r.paint(ansiBold), r.paint(ansiBrightBlue), r.paint(ansiReset), r.paint(ansiBrightBlue))
-			r.streaming = true
-		}
-		fmt.Fprint(r.out, ev.Text)
-	case agentkit.ReasoningDelta:
-		if !r.streaming {
-			r.startBlock(false)
-			fmt.Fprintf(r.out, "%sreasoning › %s", r.paint(ansiDim), r.paint(ansiReset))
-			fmt.Fprint(r.out, r.paint(ansiDim))
-			r.streaming = true
-		}
-		fmt.Fprint(r.out, ev.Text)
 	case agentkit.MessageDone:
-		r.finishStream()
+		r.message(ev.Message)
 	case agentkit.ToolUse:
-		r.finishStream()
-		r.startBlock(false)
-		fmt.Fprintf(r.out, "%stool call › %s %s%s\n", r.paint(ansiBrightBlack), ev.Name, trimOneTrailingNewline(string(ev.Input)), r.paint(ansiReset))
+		// Tool calls are rendered from the completed ToolUseBlock so they do
+		// not appear twice when AgentKit also surfaces a ToolUse event.
 	case agentkit.ToolResult:
-		r.finishStream()
-		label := "tool result ›"
-		if ev.IsError {
-			label = "tool error ›"
-		}
-		r.startBlock(false)
-		fmt.Fprintf(r.out, "%s%s %s: %s%s\n", r.resultColor(ev.IsError), label, ev.Name, trimOneTrailingNewline(ev.Output), r.paint(ansiReset))
+		r.toolResult(ev.Name, ev.Output, ev.IsError)
 	}
 }
 
@@ -208,7 +185,6 @@ func (r *decoratedRenderer) Usage(turn agentkit.Usage, turnCost, total agentkit.
 }
 
 func (r *decoratedRenderer) Summary(total agentkit.Usage, totalCost agentkit.Cost) {
-	r.finishStream()
 	r.startBlock(false)
 	fmt.Fprintln(r.out, "summary")
 	fmt.Fprintf(r.out, "· tokens  in=%d cache(r=%d w=%d) out=%d reasoning=%d total=%d\n",
@@ -223,28 +199,72 @@ func (r *decoratedRenderer) Summary(total agentkit.Usage, totalCost agentkit.Cos
 }
 
 func (r *decoratedRenderer) Warning(w agentkit.Warning) {
-	r.finishStream()
 	r.startBlock(false)
 	fmt.Fprintf(r.out, "%swarning ›%s %s: %s\n", r.paint(ansiYellow), r.paint(ansiReset), w.Setting, w.Detail)
 }
 
 func (r *decoratedRenderer) Error(err error) {
-	r.finishStream()
 	r.startBlock(false)
 	fmt.Fprintf(r.out, "%serror ›%s %v\n", r.paint(ansiRed), r.paint(ansiReset), err)
 }
 
 func (r *decoratedRenderer) Notice(line string) {
-	r.finishStream()
 	r.startBlock(false)
 	fmt.Fprintf(r.out, "notice › %s\n", line)
 }
 
-func (r *decoratedRenderer) finishStream() {
-	if r.streaming {
-		fmt.Fprintln(r.out, r.paint(ansiReset))
-		r.streaming = false
+func (r *decoratedRenderer) message(message agentkit.Message) {
+	for _, block := range message.Blocks {
+		switch block := block.(type) {
+		case agentkit.ReasoningBlock:
+			r.reasoning(block.Summary)
+		case agentkit.TextBlock:
+			r.text(block.Text)
+		case agentkit.ToolUseBlock:
+			r.toolUse(block.Name, block.Input)
+		case agentkit.ToolResultBlock:
+			r.toolResult(block.Name, block.Content, block.IsError)
+		}
 	}
+}
+
+func (r *decoratedRenderer) reasoning(summary string) {
+	summary = trimTrailingNewlines(summary)
+	if summary == "" {
+		return
+	}
+	r.startBlock(false)
+	fmt.Fprintf(r.out, "%sreasoning › %s%s\n", r.paint(ansiDim), summary, r.paint(ansiReset))
+}
+
+func (r *decoratedRenderer) text(text string) {
+	text = trimTrailingNewlines(text)
+	if text == "" {
+		return
+	}
+	r.startBlock(false)
+	fmt.Fprintf(r.out, "%s%sassistant ›%s %s%s%s\n", r.paint(ansiBold), r.paint(ansiBrightBlue), r.paint(ansiReset), r.paint(ansiBrightBlue), text, r.paint(ansiReset))
+}
+
+func (r *decoratedRenderer) toolUse(name string, input json.RawMessage) {
+	if name == "" && len(input) == 0 {
+		return
+	}
+	r.startBlock(false)
+	fmt.Fprintf(r.out, "%stool call › %s %s%s\n", r.paint(ansiBrightBlack), name, trimTrailingNewlines(string(input)), r.paint(ansiReset))
+}
+
+func (r *decoratedRenderer) toolResult(name, output string, isError bool) {
+	output = trimTrailingNewlines(output)
+	if name == "" && output == "" {
+		return
+	}
+	label := "tool result ›"
+	if isError {
+		label = "tool error ›"
+	}
+	r.startBlock(false)
+	fmt.Fprintf(r.out, "%s%s %s: %s%s\n", r.resultColor(isError), label, name, output, r.paint(ansiReset))
 }
 
 func (r *decoratedRenderer) startBlock(prompt bool) {
@@ -380,15 +400,8 @@ func formatUSD(cost agentkit.Cost) string {
 	return fmt.Sprintf("%.6f", cost.USD())
 }
 
-func trimOneTrailingNewline(s string) string {
-	if len(s) == 0 || s[len(s)-1] != '\n' {
-		return s
-	}
-	s = s[:len(s)-1]
-	if len(s) > 0 && s[len(s)-1] == '\r' {
-		return s[:len(s)-1]
-	}
-	return s
+func trimTrailingNewlines(s string) string {
+	return strings.TrimRight(s, "\r\n")
 }
 
 const (

@@ -1,4 +1,6 @@
 <ESC>[1myou ›<ESC>[0m 
+<ESC>[2mreasoning › thinking<ESC>[0m
+
 <ESC>[1m<ESC>[94massistant ›<ESC>[0m <ESC>[94mHi<ESC>[0m
 
 <ESC>[90mtool call › read {"path":"ok.txt"}<ESC>[0m
