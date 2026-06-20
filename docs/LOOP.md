@@ -9,7 +9,7 @@ Read this whole file, then the documents it points to, then act.
 ## The three documents (authority for *what*)
 
 - **`docs/product.md` — *why*.** Intent, users, scope, the user-facing promises. Read it **only to resolve genuine ambiguity of intent**; it owns no mechanism, types, or commands.
-- **`docs/design.md` — *how* + the id denominator.** The single source of truth for seams, public interfaces, naming, type/struct definitions, the data model, and the toolchain (its *Conventions* section). It is also the **only** place the `R-XXXX-XXXX` Verification ids live — each Decision ends with a **Verification** list of the behaviors that Decision requires. (`docs/research.md` holds background if present; consult only if a Decision points you there.)
+- **`docs/design.md` + `docs/design/` — *how* + the id denominator.** Split for addressability so you never load the whole architecture to find one Decision. `docs/design.md` holds the **spine**: the toolchain (its *Conventions* section) and the *Requirement ids* convention. **`docs/design/INDEX.md`** is the manifest — it maps each **Decision → its file** and every **`R-XXXX-XXXX` id → its Decision/file** (resolve an id with `grep R-XXXX-XXXX docs/design/INDEX.md`). Each Decision's body is its own **`docs/design/DNN.md`** (zero-padded; referenced as `D<N>`), self-contained — the Decision, its public interfaces, and a **Verification** list, the **only** place the ids live. (`docs/research.md` holds background if present; consult only if a Decision points you there.)
 - **`docs/plan.md` + `docs/plan/` — *construction order & history*.** Split for addressability so you never load the whole history to find your next unit of work. `docs/plan.md` holds only the invariant rules. **`docs/plan/STATUS.md`** is the manifest — one grep-able line per phase carrying its status marker (`⬜`/`✅`) and the Decision(s) it realizes; it is the **only** place a status marker lives. Each phase's body is its own **`docs/plan/phase-NN.md`** (zero-padded; sub-phases keep their suffix, e.g. `phase-07a.md`). The **only** edit you ever make is flipping one phase's marker from `⬜` to `✅` in `STATUS.md`. Never rewrite a phase file, never touch another phase's line.
 
 You do **not** edit `product.md` or `design.md`. Ever. If building reveals the design is wrong, halt and report (see *Report status*).
@@ -50,7 +50,7 @@ If a phase genuinely will not fit one context, **halt and report it as a design 
 Read:
 
 - `docs/plan/STATUS.md` to locate the **first `⬜` phase**, then **only that one `docs/plan/phase-NN.md`** — its objective, its *Realizes design Decision N* line, its *Depends on* line, and its *Done when* id list. Do not read other phase files.
-- In `design.md`, **only the Decision(s) that phase realizes** and their Verification ids.
+- Resolve each Decision the phase realizes to its file via `docs/design/INDEX.md`, then read **only that `docs/design/DNN.md`** — the Decision and its Verification ids. Do not read other Decision files.
 - The **public interfaces only** of the packages this phase depends on — the small exported surface listed in those packages' design Decisions (type signatures, function signatures). Read them to consume, not to copy.
 - `product.md` **only when intent is genuinely ambiguous.**
 
