@@ -1,0 +1,7 @@
+# Phase 12 — Catalog reasoning introspector field
+
+*Realizes design Decision 2 (the `Reasoning agentkit.ReasoningInspector` field and its anti-drift). Depends on Phase 2 (catalog) and Phase 11 (the agentkit pin that exports `ReasoningInspector` and the per-sub-package `Reasoning` values).*
+
+Additive — the existing `Default()`/`Lookup`/`HasModel`/`Build` surface keeps its shape. `catalog.Provider` gains `Reasoning agentkit.ReasoningInspector`, and `Default()` sets each entry's `Reasoning` to its sub-package's credential-blind introspector value (`anthropic.Reasoning`, `google.Reasoning`, `openai.Reasoning`, `zai.Reasoning`) alongside `New` — it is not the constructed provider and needs no key. This is the single source the `--help` catalog (Phase 14) reads each model's native reasoning vocabulary from, so agentrepl embeds zero provider reasoning knowledge; config coercion (Phase 11) deliberately does **not** consult it. A reasoning anti-drift test mirrors the existing pricing anti-drift (R-OWM8-I2NH): every curated `Models` id must resolve to a `ReasoningSpec` via `p.Reasoning.ReasoningSpec(id)`, so `--help` never renders a curated model with no descriptor.
+
+**Done when:** R-FQT4-7JCQ (`Default()` sets each `Reasoning` to its sub-package introspector, non-nil and credential-blind) and R-FS10-LB3F (reasoning anti-drift: every curated id resolves to a `ReasoningSpec`) are covered by clearly-named tests and the suite is green.

@@ -1,0 +1,10 @@
+# Phase 7a — REPL launch surface, loop & command dispatch (no live turn)
+
+*Realizes design Decision 4 (CLI flags), Decision 9 (slash-command dispatch & command set, the non-turn half), and Decision 11 (resilience, the command/config in-loop half). Depends on Phases 2, 3, 4, 5, 6.*
+
+Build the orchestrator's launch surface and read-dispatch loop in `internal/repl`, consuming only the public interfaces of catalog, config, render, session, and tools. This phase carries **no live turn execution** — a plain-message line routes to a turn-handler seam that Phase 7b fills in; here it is an inert stub. End state: `ParseArgs`/`Options` (the launch surface over a local `flag.FlagSet`); `Run(ctx, Deps, opts)` that opens the session log (deferred close for resource hygiene), builds the `Conversation`+`Target`, applies `opts.Config` in order (a bad pair is fatal — returns exit code 1, loop never starts), registers the four tools, then drives the loop; the `command` table + `state`; line classification (`/`-command dispatched, empty line ignored, other line handed to the turn seam); the command set that needs no live turn — `/set`, `/get`, `/dump`, `/clear`, `/render`, `/providers`, `/help`, `/exit`, `/quit` — with runtime errors non-fatal and rendered to stdout; and the turn pre-check hint when provider+model aren't both set (renders the hint, does **not** call `Send`). `/exit`/`/quit`/EOF terminate the loop and `Run` returns exit 0; the full graceful summary-then-`conv.Close()` cleanup sequence (R-LW8O) is completed in Phase 7b. `/usage`'s real summary trigger also lands in 7b. The `ctx` is taken as a parameter (a plain `context.Background()` in this phase's tests and in main until Phase 8 supplies the cancellable one). The loop survives every command/config/selection error.
+
+**Done when:** these are covered by clearly-named tests (repl-level, captured stdout) and the suite is green:
+- Decision 4 — R-EU69-75V4, R-EWM1-YPCI, R-EXTY-CH37, R-EZ1U-Q8TW.
+- Decision 9 (non-turn) — R-BI0J-TIHX, R-BKGC-L1ZB, R-BLO8-YTQ0, R-BMW5-CLGP, R-BO41-QD7E, R-BPBY-44Y3, R-BQJU-HWOS.
+- Decision 11 (command/config) — R-H8PP-ZFI3.

@@ -10,7 +10,7 @@ Read this whole file, then the documents it points to, then act.
 
 - **`docs/product.md` — *why*.** Intent, users, scope, the user-facing promises. Read it **only to resolve genuine ambiguity of intent**; it owns no mechanism, types, or commands.
 - **`docs/design.md` — *how* + the id denominator.** The single source of truth for seams, public interfaces, naming, type/struct definitions, the data model, and the toolchain (its *Conventions* section). It is also the **only** place the `R-XXXX-XXXX` Verification ids live — each Decision ends with a **Verification** list of the behaviors that Decision requires. (`docs/research.md` holds background if present; consult only if a Decision points you there.)
-- **`docs/plan.md` — *construction order & history*.** Append-only, ordered phases each marked `⬜ not started` or `✅ done`. The **only** edit you ever make to it is flipping one phase's status marker from `⬜ not started` to `✅ done`. Never rewrite phase text, never touch another phase.
+- **`docs/plan.md` + `docs/plan/` — *construction order & history*.** Split for addressability so you never load the whole history to find your next unit of work. `docs/plan.md` holds only the invariant rules. **`docs/plan/STATUS.md`** is the manifest — one grep-able line per phase carrying its status marker (`⬜`/`✅`) and the Decision(s) it realizes; it is the **only** place a status marker lives. Each phase's body is its own **`docs/plan/phase-NN.md`** (zero-padded; sub-phases keep their suffix, e.g. `phase-07a.md`). The **only** edit you ever make is flipping one phase's marker from `⬜` to `✅` in `STATUS.md`. Never rewrite a phase file, never touch another phase's line.
 
 You do **not** edit `product.md` or `design.md`. Ever. If building reveals the design is wrong, halt and report (see *Report status*).
 
@@ -39,7 +39,7 @@ You do **not** edit `product.md` or `design.md`. Ever. If building reveals the d
 
 ## Scope of one turn
 
-Build **exactly one phase**: the **first phase still marked `⬜ not started`** in `docs/plan.md`, top to bottom. Then stop and report.
+Build **exactly one phase**: the **first phase still marked `⬜`** in `docs/plan/STATUS.md`, top to bottom (find it with `grep -nE '^Phase .* ⬜' docs/plan/STATUS.md | head -1`, then read only that phase's `docs/plan/phase-NN.md`). Then stop and report.
 
 One phase is **one package's worth of work in one accumulating context** — read, build, test, verify, all in this single turn. There is no per-item inner loop and no fresh context per behavior; you handle the whole phase here.
 
@@ -49,7 +49,7 @@ If a phase genuinely will not fit one context, **halt and report it as a design 
 
 Read:
 
-- The **first `⬜ not started` phase entry** in `plan.md` — its objective, its *Realizes design Decision N* line, its *Depends on* line, and its *Done when* id list.
+- `docs/plan/STATUS.md` to locate the **first `⬜` phase**, then **only that one `docs/plan/phase-NN.md`** — its objective, its *Realizes design Decision N* line, its *Depends on* line, and its *Done when* id list. Do not read other phase files.
 - In `design.md`, **only the Decision(s) that phase realizes** and their Verification ids.
 - The **public interfaces only** of the packages this phase depends on — the small exported surface listed in those packages' design Decisions (type signatures, function signatures). Read them to consume, not to copy.
 - `product.md` **only when intent is genuinely ambiguous.**
@@ -62,7 +62,7 @@ Do **not** read: dependency package *internals*, unrelated Decisions, or other p
 2. **Cover every Verification id** the phase owns with a genuine, clearly-named test, and tag each test with its id in the coverage-comment form `// R-XXXX-XXXX` so coverage is a grep. Use the test styles design's *Testing strategy* prescribes (table-driven for `config`; golden files under `testdata/` with a `-update` flag for `render`; temp working dir for `tools`; real `Conversation` + fake `Provider` with scripted stdin for `repl`). A pure structural/seam phase with no ids is proven by the green build plus any integration smoke it names.
 3. **Hold the global invariant:** before you finish, the build is clean and the **whole** suite is green by the project's real commands — `go build ./...`, `go vet ./...`, `go test ./...` all exit 0, and `gofmt -l .` prints nothing. Run `gofmt -w` on anything you touched.
 4. **Honor the seams:** keep time/env/IO/provider behind their injected funcs; don't introduce a package-level `time.Now`/`os.Getenv` outside the composition root; don't add an interface where design says a func suffices, or vice versa.
-5. **Flip the status marker:** in `plan.md`, change **only this phase's** `⬜ not started` to `✅ done`. Do not rewrite the phase body or touch any other phase.
+5. **Flip the status marker:** in `docs/plan/STATUS.md`, change **only this phase's** line marker from `⬜` to `✅`. Do not touch the phase file, any other line, or `docs/plan.md`.
 6. **Commit** the change with a message naming the phase (e.g. `Phase 3 — session log & session-id`). End the commit message body with the `Co-Authored-By` trailer this repo uses.
 
 ## Empowerment
@@ -73,10 +73,10 @@ Halt only for a **genuine blocker**: a phase that cannot fit one context, a Deci
 
 ## Report status (the loop contract)
 
-After marking the phase done, **re-read `plan.md`** and choose the status:
+After marking the phase done, **re-read `docs/plan/STATUS.md`** and choose the status:
 
-- **`CONTINUE`** — at least one phase is still `⬜ not started`.
-- **`DONE`** — no `⬜ not started` phase remains, **or** you hit a genuine blocker (a design change is required). When blocked, the `message` must name the blocker so a human can intervene.
+- **`CONTINUE`** — at least one phase is still `⬜`.
+- **`DONE`** — no `⬜` phase remains, **or** you hit a genuine blocker (a design change is required). When blocked, the `message` must name the blocker so a human can intervene.
 
 End your final message with **exactly one** JSON object and **nothing after it**:
 
@@ -90,5 +90,5 @@ End your final message with **exactly one** JSON object and **nothing after it**
 
 - Do **not** edit `product.md` or `design.md`. If building reveals the shape is wrong, halt and report via `DONE` — do not fix the design silently.
 - Build **only what the phase names.** No pulling work forward, no gold-plating beyond the Verification ids.
-- The only write to `plan.md` is flipping this phase's one status marker.
+- The only write to the plan is flipping this phase's one status marker in `docs/plan/STATUS.md`.
 - When a detail is merely ambiguous (not a design flaw), consult design, make the conventional choice, and proceed.
