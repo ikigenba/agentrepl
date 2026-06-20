@@ -24,4 +24,4 @@ Phase 18  ✅  realizes D5,D7,D9  — Decorated input prompt & per-turn-report r
 Phase 19  ✅  realizes D5        — Decorated palette & vertical spacing
 Phase 20  ✅  realizes D13       — Wait status line: formatters & live driver
 Phase 21  ✅  realizes D1,D5,D13 — Wait status line: seam wiring & composition root
-Phase 22  ⬜  realizes D5        — Adopt agentkit message-granular delivery (drop delta rendering)
+Phase 22  ✅  realizes D5        — Adopt agentkit message-granular delivery (drop delta rendering)
