@@ -11,7 +11,7 @@ One line per Decision, in number order — file, label, and the Verification ids
 - **D4** `docs/design/D04.md` — CLI flags
   - ids: R-EU69-75V4, R-EWM1-YPCI, R-EXTY-CH37, R-EZ1U-Q8TW
 - **D5** `docs/design/D05.md` — Turn execution, the Renderer, and color
-  - ids: R-G480-F0ID, R-G5FW-SS92, R-G6NT-6JZR, R-JFBW-TYU8, R-JGJT-7QKX, R-LL9K-SKDQ, R-LMHH-6C4F, R-LNPD-K3V4, R-LOX9-XVLT, R-LRD2-PF37, R-LSKZ-36TW, R-OBNM-N6XX, R-Q52T-PXCR
+  - ids: R-CCHP-S6AJ, R-CDPM-5Y18, R-G480-F0ID, R-G5FW-SS92, R-G6NT-6JZR, R-JFBW-TYU8, R-JGJT-7QKX, R-LL9K-SKDQ, R-LNPD-K3V4, R-LOX9-XVLT, R-LRD2-PF37, R-LSKZ-36TW, R-OBNM-N6XX, R-Q52T-PXCR
 - **D6** `docs/design/D06.md` — REPL lifecycle: exit, interrupt, and log integrity
   - ids: R-LW8O-8I1Z, R-LXGK-M9SO, R-LYOH-01JD, R-M149-RL0R
 - **D7** `docs/design/D07.md` — Usage & cost reporting
@@ -48,6 +48,8 @@ R-BMW5-CLGP  D9  docs/design/D09.md
 R-BO41-QD7E  D9  docs/design/D09.md
 R-BPBY-44Y3  D9  docs/design/D09.md
 R-BQJU-HWOS  D9  docs/design/D09.md
+R-CCHP-S6AJ  D5  docs/design/D05.md
+R-CDPM-5Y18  D5  docs/design/D05.md
 R-EU69-75V4  D4  docs/design/D04.md
 R-EWM1-YPCI  D4  docs/design/D04.md
 R-EXTY-CH37  D4  docs/design/D04.md
@@ -73,7 +75,6 @@ R-HCDF-4QQ6  D11  docs/design/D11.md
 R-JFBW-TYU8  D5  docs/design/D05.md
 R-JGJT-7QKX  D5  docs/design/D05.md
 R-LL9K-SKDQ  D5  docs/design/D05.md
-R-LMHH-6C4F  D5  docs/design/D05.md
 R-LNPD-K3V4  D5  docs/design/D05.md
 R-LOX9-XVLT  D5  docs/design/D05.md
 R-LRD2-PF37  D5  docs/design/D05.md
