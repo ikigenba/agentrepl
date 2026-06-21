@@ -15,8 +15,9 @@ make install    # → ~/.local/bin/agentrepl (override with PREFIX=...)
 make test       # go test ./...
 ```
 
-Requires Go 1.26. The build resolves `agentkit` through the local `replace`
-directive in `go.mod`.
+Requires Go 1.26. The build resolves `agentkit` from its published module at
+`github.com/ikigenba/agentkit` (no local `replace` directive), pinned to the
+`v0.1.1` tag. Re-pin with `go get github.com/ikigenba/agentkit@v0.1.1`.
 
 ## Credentials
 
