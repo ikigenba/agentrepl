@@ -17,7 +17,7 @@ make test       # go test ./...
 
 Requires Go 1.26. The build resolves `agentkit` from its published module at
 `github.com/ikigenba/agentkit` (no local `replace` directive), pinned to the
-`v0.1.1` tag. Re-pin with `go get github.com/ikigenba/agentkit@v0.1.1`.
+`v0.1.3` tag. Re-pin with `go get github.com/ikigenba/agentkit@v0.1.3`.
 
 ## Credentials
 
