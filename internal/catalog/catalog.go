@@ -37,6 +37,8 @@ func Default() []Provider {
 			Name:   "anthropic",
 			EnvKey: "ANTHROPIC_API_KEY",
 			Models: []string{
+				anthropic.ModelFable5,
+				anthropic.ModelSonnet5,
 				anthropic.ModelOpus48,
 				anthropic.ModelSonnet46,
 				anthropic.ModelHaiku45,
@@ -65,6 +67,9 @@ func Default() []Provider {
 			Name:   "openai",
 			EnvKey: "OPENAI_API_KEY",
 			Models: []string{
+				openai.ModelGPT56Luna,
+				openai.ModelGPT56Sol,
+				openai.ModelGPT56Terra,
 				openai.ModelGPT55Pro,
 				openai.ModelGPT55,
 				openai.ModelGPT54,

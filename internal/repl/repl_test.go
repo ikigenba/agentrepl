@@ -142,39 +142,8 @@ func TestWriteHelpListsDefaultCatalogInOrder(t *testing.T) {
 func TestWriteHelpGoldenReasoningClausesByKind(t *testing.T) {
 	// R-FVOP-QMBI
 	// R-6DEO-9TXQ
-	cat := []catalog.Provider{
-		{
-			Name:   "enum",
-			EnvKey: "ENUM_KEY",
-			Models: []string{"enum-model"},
-			Reasoning: staticReasoning{"enum-model": {
-				Term: "effort", Kind: agentkit.ReasoningEnum,
-				Levels: []string{"low", "high"}, Default: agentkit.Level("high"),
-			}},
-		},
-		{
-			Name:   "range",
-			EnvKey: "RANGE_KEY",
-			Models: []string{"range-model"},
-			Reasoning: staticReasoning{"range-model": {
-				Term: "thinking budget", Kind: agentkit.ReasoningRange,
-				Min: 0, Max: 24576,
-				Sentinels: []agentkit.Sentinel{{Value: 0, Meaning: "off"}, {Value: -1, Meaning: "dynamic"}},
-				Default:   agentkit.Budget(-1),
-			}},
-		},
-		{
-			Name:   "toggle",
-			EnvKey: "TOGGLE_KEY",
-			Models: []string{"toggle-model"},
-			Reasoning: staticReasoning{"toggle-model": {
-				Term: "thinking", Kind: agentkit.ReasoningToggle, CanDisable: true,
-			}},
-		},
-	}
-
 	var out bytes.Buffer
-	WriteHelp(&out, "agentrepl-test", cat)
+	WriteHelp(&out, "agentrepl-test", catalog.Default())
 	want, err := os.ReadFile(filepath.Join("testdata", "help_reasoning.golden"))
 	if err != nil {
 		t.Fatalf("reading golden: %v", err)
