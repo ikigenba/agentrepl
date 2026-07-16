@@ -17,10 +17,10 @@ models:
     claude-sonnet-5          effort={low|*medium|high|xhigh|max}
     claude-opus-4-8          effort={low|medium|*high|xhigh|max}
     claude-sonnet-4-6        effort={low|medium|*high|max}
-    claude-haiku-4-5         thinking_budget=<1024–4096>  (thinking budget; default off)
+    claude-haiku-4-5         thinking_budget=<1024–4096>  (default off)
   google
-    gemini-2.5-flash         thinking_budget=<0–24576>  (thinking budget; 0=off, -1=dynamic; default dynamic)
-    gemini-2.5-pro           thinking_budget=<128–32768>  (thinking budget; -1=dynamic; default dynamic)
+    gemini-2.5-flash         thinking_budget=<0–24576>  (0=off, -1=dynamic; default dynamic)
+    gemini-2.5-pro           thinking_budget=<128–32768>  (-1=dynamic; default dynamic)
     gemini-3.5-flash         thinking_level={minimal|low|*medium|high}
     gemini-3.1-flash-lite    thinking_level={minimal|low|*medium|high}
     gemini-3.1-pro-preview   thinking_level={low|medium|*high}

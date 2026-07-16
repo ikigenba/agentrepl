@@ -189,7 +189,7 @@ func TestWriteHelpMarksEnumeratedDefaultsAndRetainsOnlyTermResidue(t *testing.T)
 		"effort={low|*medium|high}\n",
 		"effort={high|*max}  (+ toggle)\n",
 		"thinking={*on|off}\n",
-		"thinking_budget=<0–24576>  (thinking budget; -1=dynamic; default dynamic)\n",
+		"thinking_budget=<0–24576>  (-1=dynamic; default dynamic)\n",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help output = %q, want row ending %q", help, want)
@@ -199,6 +199,44 @@ func TestWriteHelpMarksEnumeratedDefaultsAndRetainsOnlyTermResidue(t *testing.T)
 		if strings.Contains(help, unwanted) {
 			t.Errorf("help output = %q, do not want %q", help, unwanted)
 		}
+	}
+}
+
+func TestWriteHelpReasoningRangeOmitsRedundantNativeTerm(t *testing.T) {
+	// R-AFZE-5WGV
+	cat := []catalog.Provider{{
+		Name:   "test",
+		EnvKey: "TEST_API_KEY",
+		Models: []string{"sentinels", "no-sentinels"},
+		Reasoning: staticReasoning{
+			"sentinels": {
+				Term: "thinking budget", Kind: agentkit.ReasoningRange,
+				Min: 0, Max: 24576, Default: agentkit.Budget(-1),
+				Sentinels: []agentkit.Sentinel{
+					{Value: 0, Meaning: "off"},
+					{Value: -1, Meaning: "dynamic"},
+				},
+			},
+			"no-sentinels": {
+				Term: "thinking budget", Kind: agentkit.ReasoningRange,
+				Min: 1024, Max: 4096, Default: agentkit.DisableReasoning(),
+			},
+		},
+	}}
+
+	var out bytes.Buffer
+	WriteHelp(&out, "agentrepl", cat)
+	help := out.String()
+	for _, want := range []string{
+		"thinking_budget=<0–24576>  (0=off, -1=dynamic; default dynamic)",
+		"thinking_budget=<1024–4096>  (default off)",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help output = %q, want %q", help, want)
+		}
+	}
+	if strings.Contains(help, "(thinking budget;") {
+		t.Fatalf("help output = %q, contains redundant native term", help)
 	}
 }
 
