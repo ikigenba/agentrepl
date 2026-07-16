@@ -91,7 +91,7 @@ func TestParseArgsHelpWritesCatalogAndReturnsErrHelpCredentialBlind(t *testing.T
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("ParseArgs(-h) error = %v, want flag.ErrHelp", err)
 	}
-	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)", "test-model", "effort={low|high}  (effort; default high)"} {
+	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)", "test-model", "effort={low|*high}"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("help output = %q, want %q", out.String(), want)
 		}
@@ -142,6 +142,8 @@ func TestWriteHelpListsDefaultCatalogInOrder(t *testing.T) {
 func TestWriteHelpGoldenReasoningClausesByKind(t *testing.T) {
 	// R-FVOP-QMBI
 	// R-6DEO-9TXQ
+	// R-ODOF-XOTJ
+	// R-OEWC-BGK8
 	var out bytes.Buffer
 	WriteHelp(&out, "agentrepl-test", catalog.Default())
 	want, err := os.ReadFile(filepath.Join("testdata", "help_reasoning.golden"))
@@ -150,6 +152,53 @@ func TestWriteHelpGoldenReasoningClausesByKind(t *testing.T) {
 	}
 	if out.String() != string(want) {
 		t.Fatalf("help output mismatch\nwant:\n%s\ngot:\n%s", want, out.String())
+	}
+}
+
+func TestWriteHelpMarksEnumeratedDefaultsAndRetainsOnlyTermResidue(t *testing.T) {
+	// R-ODOF-XOTJ
+	// R-OEWC-BGK8
+	cat := []catalog.Provider{{
+		Name:   "test",
+		EnvKey: "TEST_API_KEY",
+		Models: []string{"enum", "enum-with-residue", "toggle", "range"},
+		Reasoning: staticReasoning{
+			"enum": {
+				Term: "effort", Kind: agentkit.ReasoningEnum,
+				Levels: []string{"low", "medium", "high"}, Default: agentkit.Level("medium"),
+			},
+			"enum-with-residue": {
+				Term: "effort (+ toggle)", Kind: agentkit.ReasoningEnum,
+				Levels: []string{"high", "max"}, Default: agentkit.Level("max"),
+			},
+			"toggle": {
+				Term: "thinking", Kind: agentkit.ReasoningToggle,
+			},
+			"range": {
+				Term: "thinking budget", Kind: agentkit.ReasoningRange,
+				Min: 0, Max: 24576, Default: agentkit.Budget(-1),
+				Sentinels: []agentkit.Sentinel{{Value: -1, Meaning: "dynamic"}},
+			},
+		},
+	}}
+
+	var out bytes.Buffer
+	WriteHelp(&out, "agentrepl", cat)
+	help := out.String()
+	for _, want := range []string{
+		"effort={low|*medium|high}\n",
+		"effort={high|*max}  (+ toggle)\n",
+		"thinking={*on|off}\n",
+		"thinking_budget=<0–24576>  (thinking budget; -1=dynamic; default dynamic)\n",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help output = %q, want row ending %q", help, want)
+		}
+	}
+	for _, unwanted := range []string{"(effort;", "(thinking;", "default medium", "default max", "default on"} {
+		if strings.Contains(help, unwanted) {
+			t.Errorf("help output = %q, do not want %q", help, unwanted)
+		}
 	}
 }
 

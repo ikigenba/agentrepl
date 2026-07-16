@@ -45,7 +45,11 @@ func reasoningClause(provider catalog.Provider, model string) string {
 	key := termToKey(spec.Term)
 	switch spec.Kind {
 	case agentkit.ReasoningEnum:
-		return fmt.Sprintf("%s={%s}  (%s; default %s)", key, strings.Join(spec.Levels, "|"), spec.Term, formatReasoningDefault(spec))
+		clause := fmt.Sprintf("%s={%s}", key, strings.Join(markReasoningDefault(spec.Levels, formatReasoningDefault(spec)), "|"))
+		if residue := reasoningTermResidue(spec.Term, key); residue != "" {
+			clause += "  (" + residue + ")"
+		}
+		return clause
 	case agentkit.ReasoningRange:
 		clause := fmt.Sprintf("%s=<%d–%d>", key, spec.Min, spec.Max)
 		if len(spec.Sentinels) == 0 {
@@ -57,10 +61,31 @@ func reasoningClause(provider catalog.Provider, model string) string {
 		}
 		return clause + fmt.Sprintf("  (%s; %s; default %s)", spec.Term, strings.Join(parts, ", "), formatReasoningDefault(spec))
 	case agentkit.ReasoningToggle:
-		return fmt.Sprintf("%s={on|off}  (%s; default %s)", key, spec.Term, formatReasoningDefault(spec))
+		return fmt.Sprintf("%s={%s}", key, strings.Join(markReasoningDefault([]string{"on", "off"}, formatReasoningDefault(spec)), "|"))
 	default:
 		return "(no reasoning control)"
 	}
+}
+
+func markReasoningDefault(values []string, defaultValue string) []string {
+	marked := make([]string, len(values))
+	for i, value := range values {
+		marked[i] = value
+		if value == defaultValue {
+			marked[i] = "*" + value
+		}
+	}
+	return marked
+}
+
+func reasoningTermResidue(term, key string) string {
+	base := strings.ReplaceAll(key, "_", " ")
+	if len(term) < len(base) || !strings.EqualFold(term[:len(base)], base) {
+		return ""
+	}
+	residue := strings.TrimSpace(term[len(base):])
+	residue = strings.TrimPrefix(residue, "(")
+	return strings.TrimSpace(strings.TrimSuffix(residue, ")"))
 }
 
 func termToKey(term string) string {

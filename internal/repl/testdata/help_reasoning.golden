@@ -13,28 +13,28 @@ providers:
 
 models:
   anthropic
-    claude-fable-5           effort={low|medium|high|xhigh|max}  (effort; default medium)
-    claude-sonnet-5          effort={low|medium|high|xhigh|max}  (effort; default medium)
-    claude-opus-4-8          effort={low|medium|high|xhigh|max}  (effort; default high)
-    claude-sonnet-4-6        effort={low|medium|high|max}  (effort; default high)
+    claude-fable-5           effort={low|*medium|high|xhigh|max}
+    claude-sonnet-5          effort={low|*medium|high|xhigh|max}
+    claude-opus-4-8          effort={low|medium|*high|xhigh|max}
+    claude-sonnet-4-6        effort={low|medium|*high|max}
     claude-haiku-4-5         thinking_budget=<1024–4096>  (thinking budget; default off)
   google
     gemini-2.5-flash         thinking_budget=<0–24576>  (thinking budget; 0=off, -1=dynamic; default dynamic)
     gemini-2.5-pro           thinking_budget=<128–32768>  (thinking budget; -1=dynamic; default dynamic)
-    gemini-3.5-flash         thinking_level={minimal|low|medium|high}  (thinking level; default medium)
-    gemini-3.1-flash-lite    thinking_level={minimal|low|medium|high}  (thinking level; default medium)
-    gemini-3.1-pro-preview   thinking_level={low|medium|high}  (thinking level; default high)
+    gemini-3.5-flash         thinking_level={minimal|low|*medium|high}
+    gemini-3.1-flash-lite    thinking_level={minimal|low|*medium|high}
+    gemini-3.1-pro-preview   thinking_level={low|medium|*high}
   openai
-    gpt-5.6-luna             effort={none|low|medium|high|xhigh}  (effort; default medium)
-    gpt-5.6-sol              effort={none|low|medium|high|xhigh}  (effort; default medium)
-    gpt-5.6-terra            effort={none|low|medium|high|xhigh}  (effort; default medium)
-    gpt-5.5-pro              effort={high|xhigh}  (effort; default high)
-    gpt-5.5                  effort={none|low|medium|high|xhigh}  (effort; default medium)
-    gpt-5.4                  effort={none|low|medium|high|xhigh}  (effort; default none)
-    gpt-5.4-mini             effort={none|low|medium|high|xhigh}  (effort; default none)
-    gpt-5.4-nano             effort={none|low|medium|high|xhigh}  (effort; default none)
+    gpt-5.6-luna             effort={none|low|*medium|high|xhigh}
+    gpt-5.6-sol              effort={none|low|*medium|high|xhigh}
+    gpt-5.6-terra            effort={none|low|*medium|high|xhigh}
+    gpt-5.5-pro              effort={*high|xhigh}
+    gpt-5.5                  effort={none|low|*medium|high|xhigh}
+    gpt-5.4                  effort={*none|low|medium|high|xhigh}
+    gpt-5.4-mini             effort={*none|low|medium|high|xhigh}
+    gpt-5.4-nano             effort={*none|low|medium|high|xhigh}
   zai
-    glm-5.2                  effort={high|max}  (effort (+ toggle); default max)
-    glm-5.1                  effort={high|max}  (effort (+ toggle); default max)
-    glm-4.7                  thinking={on|off}  (thinking; default on)
-    glm-4.6                  thinking={on|off}  (thinking; default on)
+    glm-5.2                  effort={high|*max}  (+ toggle)
+    glm-5.1                  effort={high|*max}  (+ toggle)
+    glm-4.7                  thinking={*on|off}
+    glm-4.6                  thinking={*on|off}
