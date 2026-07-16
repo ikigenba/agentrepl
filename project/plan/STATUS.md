@@ -29,4 +29,4 @@ The manifest. One Markdown bullet per phase, in build order, each beginning with
 - Phase 24  ✅  realizes —         — Adopt v0.3.0's new curated models (Claude 5, GPT-5.6)
 - Phase 25  ✅  realizes D12       — `--help` marks each enum/toggle default inline with `*`
 - Phase 26  ✅  realizes D12       — `--help` drops the redundant native term from range rows
-- Phase 27  ⬜  realizes D12       — `--help` stars a range default that matches a sentinel
+- Phase 27  ✅  realizes D12       — `--help` stars a range default that matches a sentinel
