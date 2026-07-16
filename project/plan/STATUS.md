@@ -26,4 +26,4 @@ The manifest. One Markdown bullet per phase, in build order, each beginning with
 - Phase 21  ✅  realizes D1,D5,D13 — Wait status line: seam wiring & composition root
 - Phase 22  ✅  realizes D5        — Adopt agentkit message-granular delivery (drop delta rendering)
 - Phase 23  ✅  realizes —         — Bump agentkit dependency pin to v0.3.0
-- Phase 24  ⬜  realizes —         — Adopt v0.3.0's new curated models (Claude 5, GPT-5.6)
+- Phase 24  ✅  realizes —         — Adopt v0.3.0's new curated models (Claude 5, GPT-5.6)
