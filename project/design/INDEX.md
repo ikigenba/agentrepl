@@ -25,7 +25,7 @@ One line per Decision, in number order — file, label, and the Verification ids
 - **D11** `project/design/D11.md` — Error handling & REPL resilience
   - ids: R-H7HT-LNRE, R-H8PP-ZFI3, R-H9XM-D78S, R-HB5I-QYZH, R-HCDF-4QQ6
 - **D12** `project/design/D12.md` — The self-describing `--help` catalog
-  - ids: R-6DEO-9TXQ, R-6DEO-KEYS, R-AFZE-5WGV, R-FT8W-Z2U4, R-FUGT-CUKT, R-FVOP-QMBI, R-FWWM-4E27, R-FY4I-I5SW, R-ODOF-XOTJ, R-OEWC-BGK8
+  - ids: R-6DEO-9TXQ, R-6DEO-KEYS, R-AFZE-5WGV, R-APDX-FP3D, R-FT8W-Z2U4, R-FUGT-CUKT, R-FVOP-QMBI, R-FWWM-4E27, R-FY4I-I5SW, R-ODOF-XOTJ, R-OEWC-BGK8
 - **D13** `project/design/D13.md` — Wait status line (`waiting for <model>`)
   - ids: R-6DZ8-F5IK, R-6F74-SX99, R-6HMX-KGQN
 
@@ -41,6 +41,7 @@ R-8HN0-ZJPJ  D8  project/design/D08.md
 R-8IUX-DBG8  D8  project/design/D08.md
 R-8K2T-R36X  D8  project/design/D08.md
 R-AFZE-5WGV  D12  project/design/D12.md
+R-APDX-FP3D  D12  project/design/D12.md
 R-BI0J-TIHX  D9  project/design/D09.md
 R-BJ8G-7A8M  D9  project/design/D09.md
 R-BKGC-L1ZB  D9  project/design/D09.md
