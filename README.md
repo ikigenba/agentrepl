@@ -16,8 +16,11 @@ make test       # go test ./...
 ```
 
 Requires Go 1.26. The build resolves `agentkit` from its published module at
-`github.com/ikigenba/agentkit` (no local `replace` directive), pinned to the
-`v0.1.3` tag. Re-pin with `go get github.com/ikigenba/agentkit@v0.1.3`.
+`github.com/ikigenba/agentkit` (no local `replace` directive). The exact pinned
+version lives in `go.mod` — see the `require` line there. Bumping it is a spec
+change, not a bare `go get`: the pinned version is a plan fact, so a new
+`project/plan/` phase names the target and the build loop realizes it in
+`go.mod`.
 
 ## Credentials
 

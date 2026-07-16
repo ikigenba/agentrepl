@@ -39,5 +39,9 @@ drives one phase per turn; see the `$ralph` skill for that workflow.
 
 agentrepl is an unreleased internal harness — no version tags, no version
 constant. What is pinned is its agentkit dependency: `go.mod` resolves
-`github.com/ikigenba/agentkit` from the published module (no local `replace`),
-currently at `v0.1.3`. Re-pin with `go get github.com/ikigenba/agentkit@vX.Y.Z`.
+`github.com/ikigenba/agentkit` from the published module (no local `replace`).
+The exact pinned version is a plan fact, not a doc fact — it lives in the
+`go.mod` `require` line, set by a `project/plan/` dependency-bump phase. Bumping
+it is a spec change: settle it under `project/` and append a phase naming the
+new target; the build loop runs `go get` and updates `go.mod`. Don't hardcode
+the version number here or in any README.
