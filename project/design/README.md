@@ -1,6 +1,6 @@
 # agentrepl — Design
 
-**Authority: shape and its proof.** This document owns *how* agentrepl is built — its seams, public interfaces, naming, struct/type definitions, data model — and *how each behavior is proven*. The product (`docs/product.md`) owns the *why*, the users, scope, and the user-facing promises; design states the **exact, checkable form** of those promises and never re-declares the why. Design *uses* the product's contractual constants (module path, config separator, credential variable names, session-log location) **by value** but does not own them. This is the single, current statement of the architecture: when a decision changes, this doc is rewritten in place to stay true — decisions are never stacked. The construction history lives in the plan.
+**Authority: shape and its proof.** This document owns *how* agentrepl is built — its seams, public interfaces, naming, struct/type definitions, data model — and *how each behavior is proven*. The product (`project/product/README.md`) owns the *why*, the users, scope, and the user-facing promises; design states the **exact, checkable form** of those promises and never re-declares the why. Design *uses* the product's contractual constants (module path, config separator, credential variable names, session-log location) **by value** but does not own them. This is the single, current statement of the architecture: when a decision changes, this doc is rewritten in place to stay true — decisions are never stacked. The construction history lives in the plan.
 
 ## Requirement ids
 
@@ -33,14 +33,14 @@ Shared facts every Decision leans on.
 The design is split for addressability so the build loop never loads the whole
 architecture to find the one Decision a phase realizes:
 
-- **`docs/design/INDEX.md`** — the manifest: each Decision mapped to its file and
+- **`project/design/INDEX.md`** — the manifest: each Decision mapped to its file and
   the Verification ids it owns, plus a sorted `R-id → Decision/file` reverse map.
   Id lookup is a grep against this file (or against the Decision files directly).
-- **`docs/design/DNN.md`** — one file per Decision (zero-padded; referenced in
+- **`project/design/DNN.md`** — one file per Decision (zero-padded; referenced in
   prose and the plan as `D<N>`). Each is self-contained: the Decision, its public
   interfaces/types, the rejected alternatives, and its **Verification** list of
   `R-XXXX-XXXX` ids. The build loop reads only the Decision(s) its phase realizes.
-- **`docs/design.md`** (this file) — the invariant spine above: Authority, the
+- **`project/design/README.md`** (this file) — the invariant spine above: Authority, the
   *Requirement ids* convention, and *Conventions*. Static cross-cutting facts; it
   does not carry per-Decision detail.
 

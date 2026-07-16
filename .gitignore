@@ -1,4 +1,4 @@
 bin/
 
 # Ephemeral per-phase build-loop contract — written by gather, deleted by verify.
-docs/brief.md
+project/loops/brief.md
