@@ -189,7 +189,7 @@ func TestWriteHelpMarksEnumeratedDefaultsAndRetainsOnlyTermResidue(t *testing.T)
 		"effort={low|*medium|high}\n",
 		"effort={high|*max}  (+ toggle)\n",
 		"thinking={*on|off}\n",
-		"thinking_budget=<0–24576>  (-1=dynamic; default dynamic)\n",
+		"thinking_budget=<0–24576>  (-1=*dynamic)\n",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help output = %q, want row ending %q", help, want)
@@ -228,7 +228,7 @@ func TestWriteHelpReasoningRangeOmitsRedundantNativeTerm(t *testing.T) {
 	WriteHelp(&out, "agentrepl", cat)
 	help := out.String()
 	for _, want := range []string{
-		"thinking_budget=<0–24576>  (0=off, -1=dynamic; default dynamic)",
+		"thinking_budget=<0–24576>  (0=off, -1=*dynamic)",
 		"thinking_budget=<1024–4096>  (default off)",
 	} {
 		if !strings.Contains(help, want) {

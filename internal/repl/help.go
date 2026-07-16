@@ -53,10 +53,20 @@ func reasoningClause(provider catalog.Provider, model string) string {
 	case agentkit.ReasoningRange:
 		clause := fmt.Sprintf("%s=<%d–%d>", key, spec.Min, spec.Max)
 		parts := make([]string, 0, len(spec.Sentinels))
+		defaultBudget, hasDefaultBudget := spec.Default.Budget()
+		markedDefault := false
 		for _, sentinel := range spec.Sentinels {
-			parts = append(parts, fmt.Sprintf("%d=%s", sentinel.Value, sentinel.Meaning))
+			meaning := sentinel.Meaning
+			if hasDefaultBudget && !markedDefault && defaultBudget == sentinel.Value {
+				meaning = "*" + meaning
+				markedDefault = true
+			}
+			parts = append(parts, fmt.Sprintf("%d=%s", sentinel.Value, meaning))
 		}
 		details := strings.Join(parts, ", ")
+		if markedDefault {
+			return clause + "  (" + details + ")"
+		}
 		if details != "" {
 			details += "; "
 		}
