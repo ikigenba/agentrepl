@@ -113,7 +113,12 @@ func init() {
 					if s.getenv(provider.EnvKey) != "" {
 						status = "present"
 					}
-					s.rend.Notice(fmt.Sprintf("%s %s=%s models=%s", provider.Name, provider.EnvKey, status, strings.Join(provider.Models, ", ")))
+					entries := catalog.Models(provider.Name)
+					models := make([]string, len(entries))
+					for i, entry := range entries {
+						models[i] = entry.Model
+					}
+					s.rend.Notice(fmt.Sprintf("%s %s=%s models=%s", provider.Name, provider.EnvKey, status, strings.Join(models, ", ")))
 				}
 				return nil
 			},

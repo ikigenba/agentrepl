@@ -277,18 +277,18 @@ func (p *toolResultProvider) RoundTrip(_ context.Context, req *agentkit.Request)
 				Name:  p.name,
 				Input: p.input,
 			}},
-		}, agentkit.FinishToolUse, agentkit.Usage{}, nil, nil)
+		}, agentkit.FinishToolUse, agentkit.Usage{}, nil, nil, 0, true)
 	case 2:
 		result := lastToolResult(req.Messages)
 		if result == nil {
-			return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishOther, agentkit.Usage{}, nil, errors.New("missing tool result"))
+			return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishOther, agentkit.Usage{}, nil, errors.New("missing tool result"), 0, false)
 		}
 		return agentkit.NewRoundTrip(agentkit.Message{
 			Role:   agentkit.RoleAssistant,
 			Blocks: []agentkit.Block{agentkit.TextBlock{Text: "done"}},
-		}, agentkit.FinishStop, agentkit.Usage{}, nil, nil)
+		}, agentkit.FinishStop, agentkit.Usage{}, nil, nil, 0, true)
 	default:
-		return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishOther, agentkit.Usage{}, nil, errors.New("unexpected extra request"))
+		return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishOther, agentkit.Usage{}, nil, errors.New("unexpected extra request"), 0, false)
 	}
 }
 

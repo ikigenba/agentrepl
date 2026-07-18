@@ -2,7 +2,7 @@ module github.com/ikigenba/agentrepl
 
 go 1.26
 
-require github.com/ikigenba/agentkit v0.3.0
+require github.com/ikigenba/agentkit v0.4.0
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect

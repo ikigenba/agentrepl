@@ -275,7 +275,7 @@ func TestWarningGoldenRendersDistinctTreatmentAndRawCarriesFields(t *testing.T) 
 	// R-G5FW-SS92
 	warning := agentkit.Warning{
 		Setting: "reasoning",
-		Code:    agentkit.WarnReasoningUnsupported,
+		Code:    agentkit.WarnToolChoiceForced,
 		Detail:  "xhigh is not supported by test-model; using high",
 	}
 
@@ -307,7 +307,7 @@ func TestWarningGoldenRendersDistinctTreatmentAndRawCarriesFields(t *testing.T) 
 		t.Fatalf("raw warning record count = %d, want 1", len(records))
 	}
 	record := records[0]
-	if record["type"] != "warning" || record["Setting"] != "reasoning" || record["Code"] != float64(agentkit.WarnReasoningUnsupported) || record["Detail"] != warning.Detail {
+	if record["type"] != "warning" || record["Setting"] != "reasoning" || record["Code"] != float64(agentkit.WarnToolChoiceForced) || record["Detail"] != warning.Detail {
 		t.Fatalf("raw warning record = %#v, want verbatim Setting/Code/Detail", record)
 	}
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -359,21 +360,25 @@ func TestProviderAndModelCouplingUsesCatalogErrors(t *testing.T) {
 	})
 
 	t.Run("model validates against current provider", func(t *testing.T) {
-		target := newTarget()
-		if err := Set(target, "provider", "test"); err != nil {
+		models := catalog.Models("anthropic")
+		if len(models) == 0 {
+			t.Fatal("anthropic has no catalog models")
+		}
+		target := newCatalogModelTarget("anthropic")
+		if err := Set(target, "provider", "anthropic"); err != nil {
 			t.Fatalf("Set provider returned error: %v", err)
 		}
-		if err := Set(target, "model", "model-a"); err != nil {
+		if err := Set(target, "model", models[0].Model); err != nil {
 			t.Fatalf("Set valid model returned error: %v", err)
 		}
 		err := Set(target, "model", "model-z")
 		if !errors.Is(err, catalog.ErrUnknownModel) {
 			t.Fatalf("Set invalid model error = %v, want ErrUnknownModel", err)
 		}
-		if !strings.Contains(err.Error(), "choose from: model-a, model-b") {
+		if !strings.Contains(err.Error(), "choose from:") || !strings.Contains(err.Error(), models[0].Model) {
 			t.Fatalf("invalid model error = %q, want choices", err)
 		}
-		if target.Conv.Model != "model-a" {
+		if target.Conv.Model != models[0].Model {
 			t.Fatalf("model = %q, want previous valid model", target.Conv.Model)
 		}
 	})
@@ -386,8 +391,8 @@ func TestDumpReturnsAllKeysSortedWithCurrentValues(t *testing.T) {
 		key string
 		raw string
 	}{
-		{key: "provider", raw: "test"},
 		{key: "model", raw: "model-b"},
+		{key: "provider", raw: "test"},
 		{key: "system", raw: "steady"},
 		{key: "temperature", raw: "0.2"},
 		{key: "thinking_budget", raw: "8000"},
@@ -669,14 +674,14 @@ func newTarget() *Target {
 		Conv: &agentkit.Conversation{},
 		Catalog: []catalog.Provider{
 			{
-				Name:   "test",
-				EnvKey: "TEST_API_KEY",
-				Models: []string{
-					"model-a",
-					"model-b",
-				},
-				New: func(_ string, opts catalog.Options) agentkit.Provider {
-					return fakeProvider{name: "test", baseURL: opts.BaseURL}
+				Name:    "test",
+				EnvKey:  "TEST_API_KEY",
+				Methods: []catalog.AuthMethod{catalog.AuthKey},
+				New: func(getenv func(string) string, opts catalog.Options) (agentkit.Provider, error) {
+					if getenv("TEST_API_KEY") == "" {
+						return nil, fmt.Errorf("%w: TEST_API_KEY", catalog.ErrMissingKey)
+					}
+					return fakeProvider{name: "test", baseURL: opts.BaseURL}, nil
 				},
 			},
 		},
@@ -686,6 +691,19 @@ func newTarget() *Target {
 			}
 			return ""
 		},
+	}
+}
+
+func newCatalogModelTarget(name string) *Target {
+	return &Target{
+		Conv: &agentkit.Conversation{},
+		Catalog: []catalog.Provider{{
+			Name: name, EnvKey: "TEST_API_KEY", Methods: []catalog.AuthMethod{catalog.AuthKey},
+			New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
+				return fakeProvider{name: name}, nil
+			},
+		}},
+		Getenv: func(string) string { return "test-key" },
 	}
 }
 
@@ -703,23 +721,19 @@ func newZAITarget() *Target {
 		Conv: &agentkit.Conversation{},
 		Catalog: []catalog.Provider{
 			{
-				Name:   "zai",
-				EnvKey: "ZAI_API_KEY",
-				Models: []string{
-					"zai-model",
-				},
-				New: func(_ string, opts catalog.Options) agentkit.Provider {
-					return fakeProvider{name: "zai", baseURL: opts.BaseURL}
+				Name:    "zai",
+				EnvKey:  "ZAI_API_KEY",
+				Methods: []catalog.AuthMethod{catalog.AuthKey},
+				New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
+					return fakeProvider{name: "zai", baseURL: opts.BaseURL}, nil
 				},
 			},
 			{
-				Name:   "other",
-				EnvKey: "OTHER_API_KEY",
-				Models: []string{
-					"other-model",
-				},
-				New: func(_ string, opts catalog.Options) agentkit.Provider {
-					return fakeProvider{name: "other", baseURL: opts.BaseURL}
+				Name:    "other",
+				EnvKey:  "OTHER_API_KEY",
+				Methods: []catalog.AuthMethod{catalog.AuthKey},
+				New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
+					return fakeProvider{name: "other", baseURL: opts.BaseURL}, nil
 				},
 			},
 		},

@@ -28,24 +28,20 @@ func WriteHelp(out io.Writer, name string, cat []catalog.Provider) {
 	fmt.Fprintln(out, "models:")
 	for _, provider := range cat {
 		fmt.Fprintf(out, "  %s\n", provider.Name)
-		for _, model := range provider.Models {
-			fmt.Fprintf(out, "    %-24s %s\n", model, reasoningClause(provider, model))
+		for _, entry := range catalog.Models(provider.Name) {
+			fmt.Fprintf(out, "    %-24s %s\n", entry.Model, reasoningClause(entry.Reasoning))
 		}
 	}
 }
 
-func reasoningClause(provider catalog.Provider, model string) string {
-	if provider.Reasoning == nil {
-		return "(no reasoning control)"
-	}
-	spec, ok := provider.Reasoning.ReasoningSpec(model)
-	if !ok {
+func reasoningClause(spec *agentkit.ReasoningSpec) string {
+	if spec == nil {
 		return "(no reasoning control)"
 	}
 	key := termToKey(spec.Term)
 	switch spec.Kind {
 	case agentkit.ReasoningEnum:
-		clause := fmt.Sprintf("%s={%s}", key, strings.Join(markReasoningDefault(spec.Levels, formatReasoningDefault(spec)), "|"))
+		clause := fmt.Sprintf("%s={%s}", key, strings.Join(markReasoningDefault(spec.Levels, formatReasoningDefault(*spec)), "|"))
 		if residue := reasoningTermResidue(spec.Term, key); residue != "" {
 			clause += "  (" + residue + ")"
 		}
@@ -70,9 +66,9 @@ func reasoningClause(provider catalog.Provider, model string) string {
 		if details != "" {
 			details += "; "
 		}
-		return clause + "  (" + details + "default " + formatReasoningDefault(spec) + ")"
+		return clause + "  (" + details + "default " + formatReasoningDefault(*spec) + ")"
 	case agentkit.ReasoningToggle:
-		return fmt.Sprintf("%s={%s}", key, strings.Join(markReasoningDefault([]string{"on", "off"}, formatReasoningDefault(spec)), "|"))
+		return fmt.Sprintf("%s={%s}", key, strings.Join(markReasoningDefault([]string{"on", "off"}, formatReasoningDefault(*spec)), "|"))
 	default:
 		return "(no reasoning control)"
 	}

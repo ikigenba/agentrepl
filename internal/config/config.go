@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ikigenba/agentkit"
+	akcatalog "github.com/ikigenba/agentkit/catalog"
 	"github.com/ikigenba/agentrepl/internal/catalog"
 )
 
@@ -41,7 +42,7 @@ var fields = map[string]field{
 			if !ok {
 				return fmt.Errorf("%w: %q", catalog.ErrUnknownProvider, raw)
 			}
-			provider, err := p.Build(getenv(t), optionsFor(t, p))
+			provider, err := p.New(getenv(t), optionsFor(t, p))
 			if err != nil {
 				return fmt.Errorf("provider %q: %w", raw, err)
 			}
@@ -67,8 +68,9 @@ var fields = map[string]field{
 				if !ok {
 					return fmt.Errorf("%w: %q", catalog.ErrUnknownProvider, name)
 				}
-				if !p.HasModel(raw) {
-					return fmt.Errorf("%w: %q; choose from: %s", catalog.ErrUnknownModel, raw, strings.Join(p.Models, ", "))
+				models := catalog.Models(p.Name)
+				if len(models) > 0 && !hasModel(models, raw) {
+					return fmt.Errorf("%w: %q; choose from: %s", catalog.ErrUnknownModel, raw, strings.Join(modelNames(models), ", "))
 				}
 			}
 			t.Conv.Model = raw
@@ -373,10 +375,11 @@ func getenv(t *Target) func(string) string {
 }
 
 func optionsFor(t *Target, p catalog.Provider) catalog.Options {
+	opts := catalog.Options{Auth: catalog.AuthKey}
 	if p.Name == "zai" {
-		return catalog.Options{BaseURL: t.ZaiBaseURL}
+		opts.BaseURL = t.ZaiBaseURL
 	}
-	return catalog.Options{}
+	return opts
 }
 
 func setZaiBaseURL(t *Target, raw string) error {
@@ -385,7 +388,7 @@ func setZaiBaseURL(t *Target, raw string) error {
 		if !ok {
 			return fmt.Errorf("%w: %q", catalog.ErrUnknownProvider, "zai")
 		}
-		provider, err := p.Build(getenv(t), catalog.Options{BaseURL: raw})
+		provider, err := p.New(getenv(t), catalog.Options{BaseURL: raw, Auth: catalog.AuthKey})
 		if err != nil {
 			return fmt.Errorf("provider %q: %w", "zai", err)
 		}
@@ -393,4 +396,21 @@ func setZaiBaseURL(t *Target, raw string) error {
 	}
 	t.ZaiBaseURL = raw
 	return nil
+}
+
+func hasModel(entries []akcatalog.Entry, model string) bool {
+	for _, entry := range entries {
+		if entry.Model == model {
+			return true
+		}
+	}
+	return false
+}
+
+func modelNames(entries []akcatalog.Entry) []string {
+	names := make([]string, len(entries))
+	for i, entry := range entries {
+		names[i] = entry.Model
+	}
+	return names
 }

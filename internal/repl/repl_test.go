@@ -71,15 +71,10 @@ func TestParseArgsHelpWritesCatalogAndReturnsErrHelpCredentialBlind(t *testing.T
 		return []catalog.Provider{{
 			Name:   "test",
 			EnvKey: "TEST_API_KEY",
-			Models: []string{"test-model"},
-			New: func(string, catalog.Options) agentkit.Provider {
+			New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
 				constructed = true
-				return nil
+				return nil, nil
 			},
-			Reasoning: staticReasoning{"test-model": {
-				Term: "effort", Kind: agentkit.ReasoningEnum,
-				Levels: []string{"low", "high"}, Default: agentkit.Level("high"),
-			}},
 		}}
 	}
 	t.Cleanup(func() {
@@ -91,7 +86,7 @@ func TestParseArgsHelpWritesCatalogAndReturnsErrHelpCredentialBlind(t *testing.T
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("ParseArgs(-h) error = %v, want flag.ErrHelp", err)
 	}
-	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)", "test-model", "effort={low|*high}"} {
+	for _, want := range []string{"usage: agentrepl", "test        (TEST_API_KEY)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("help output = %q, want %q", out.String(), want)
 		}
@@ -129,10 +124,10 @@ func TestWriteHelpListsDefaultCatalogInOrder(t *testing.T) {
 			t.Fatalf("help = %q, want models group %s", help, provider.Name)
 		}
 		last += providerIndex
-		for _, model := range provider.Models {
-			modelIndex := strings.Index(help[last:], "    "+model)
+		for _, entry := range catalog.Models(provider.Name) {
+			modelIndex := strings.Index(help[last:], "    "+entry.Model)
 			if modelIndex < 0 {
-				t.Fatalf("help = %q, want model %s under %s", help, model, provider.Name)
+				t.Fatalf("help = %q, want model %s under %s", help, entry.Model, provider.Name)
 			}
 			last += modelIndex
 		}
@@ -158,32 +153,30 @@ func TestWriteHelpGoldenReasoningClausesByKind(t *testing.T) {
 func TestWriteHelpMarksEnumeratedDefaultsAndRetainsOnlyTermResidue(t *testing.T) {
 	// R-ODOF-XOTJ
 	// R-OEWC-BGK8
-	cat := []catalog.Provider{{
-		Name:   "test",
-		EnvKey: "TEST_API_KEY",
-		Models: []string{"enum", "enum-with-residue", "toggle", "range"},
-		Reasoning: staticReasoning{
-			"enum": {
-				Term: "effort", Kind: agentkit.ReasoningEnum,
-				Levels: []string{"low", "medium", "high"}, Default: agentkit.Level("medium"),
-			},
-			"enum-with-residue": {
-				Term: "effort (+ toggle)", Kind: agentkit.ReasoningEnum,
-				Levels: []string{"high", "max"}, Default: agentkit.Level("max"),
-			},
-			"toggle": {
-				Term: "thinking", Kind: agentkit.ReasoningToggle,
-			},
-			"range": {
-				Term: "thinking budget", Kind: agentkit.ReasoningRange,
-				Min: 0, Max: 24576, Default: agentkit.Budget(-1),
-				Sentinels: []agentkit.Sentinel{{Value: -1, Meaning: "dynamic"}},
-			},
+	specs := []*agentkit.ReasoningSpec{
+		{
+			Term: "effort", Kind: agentkit.ReasoningEnum,
+			Levels: []string{"low", "medium", "high"}, Default: agentkit.Level("medium"),
 		},
-	}}
+		{
+			Term: "effort (+ toggle)", Kind: agentkit.ReasoningEnum,
+			Levels: []string{"high", "max"}, Default: agentkit.Level("max"),
+		},
+		{
+			Term: "thinking", Kind: agentkit.ReasoningToggle,
+		},
+		{
+			Term: "thinking budget", Kind: agentkit.ReasoningRange,
+			Min: 0, Max: 24576, Default: agentkit.Budget(-1),
+			Sentinels: []agentkit.Sentinel{{Value: -1, Meaning: "dynamic"}},
+		},
+	}
 
 	var out bytes.Buffer
-	WriteHelp(&out, "agentrepl", cat)
+	for _, spec := range specs {
+		out.WriteString(reasoningClause(spec))
+		out.WriteByte('\n')
+	}
 	help := out.String()
 	for _, want := range []string{
 		"effort={low|*medium|high}\n",
@@ -204,28 +197,26 @@ func TestWriteHelpMarksEnumeratedDefaultsAndRetainsOnlyTermResidue(t *testing.T)
 
 func TestWriteHelpReasoningRangeOmitsRedundantNativeTerm(t *testing.T) {
 	// R-AFZE-5WGV
-	cat := []catalog.Provider{{
-		Name:   "test",
-		EnvKey: "TEST_API_KEY",
-		Models: []string{"sentinels", "no-sentinels"},
-		Reasoning: staticReasoning{
-			"sentinels": {
-				Term: "thinking budget", Kind: agentkit.ReasoningRange,
-				Min: 0, Max: 24576, Default: agentkit.Budget(-1),
-				Sentinels: []agentkit.Sentinel{
-					{Value: 0, Meaning: "off"},
-					{Value: -1, Meaning: "dynamic"},
-				},
-			},
-			"no-sentinels": {
-				Term: "thinking budget", Kind: agentkit.ReasoningRange,
-				Min: 1024, Max: 4096, Default: agentkit.DisableReasoning(),
+	specs := []*agentkit.ReasoningSpec{
+		{
+			Term: "thinking budget", Kind: agentkit.ReasoningRange,
+			Min: 0, Max: 24576, Default: agentkit.Budget(-1),
+			Sentinels: []agentkit.Sentinel{
+				{Value: 0, Meaning: "off"},
+				{Value: -1, Meaning: "dynamic"},
 			},
 		},
-	}}
+		{
+			Term: "thinking budget", Kind: agentkit.ReasoningRange,
+			Min: 1024, Max: 4096, Default: agentkit.DisableReasoning(),
+		},
+	}
 
 	var out bytes.Buffer
-	WriteHelp(&out, "agentrepl", cat)
+	for _, spec := range specs {
+		out.WriteString(reasoningClause(spec))
+		out.WriteByte('\n')
+	}
 	help := out.String()
 	for _, want := range []string{
 		"thinking_budget=<0–24576>  (0=off, -1=*dynamic)",
@@ -247,19 +238,19 @@ func TestWriteHelpReasoningTermsMapToRegisteredConfigKeys(t *testing.T) {
 		keys[key] = true
 	}
 	for _, provider := range catalog.Default() {
-		for _, model := range provider.Models {
-			spec, ok := provider.Reasoning.ReasoningSpec(model)
-			if !ok {
+		for _, entry := range catalog.Models(provider.Name) {
+			if entry.Reasoning == nil {
 				continue
 			}
+			spec := entry.Reasoning
 			key := termToKey(spec.Term)
 			if !keys[key] {
-				t.Fatalf("%s %s termToKey(%q) = %q, want registered config key", provider.Name, model, spec.Term, key)
+				t.Fatalf("%s %s termToKey(%q) = %q, want registered config key", provider.Name, entry.Model, spec.Term, key)
 			}
 			switch key {
 			case "effort", "thinking_budget", "thinking_level", "thinking":
 			default:
-				t.Fatalf("%s %s termToKey(%q) = %q, want native reasoning key", provider.Name, model, spec.Term, key)
+				t.Fatalf("%s %s termToKey(%q) = %q, want native reasoning key", provider.Name, entry.Model, spec.Term, key)
 			}
 		}
 	}
@@ -267,17 +258,8 @@ func TestWriteHelpReasoningTermsMapToRegisteredConfigKeys(t *testing.T) {
 
 func TestWriteHelpIncludesModelsWithoutReasoningSpec(t *testing.T) {
 	// R-FWWM-4E27
-	cat := []catalog.Provider{{
-		Name:      "plain",
-		EnvKey:    "PLAIN_KEY",
-		Models:    []string{"plain-model"},
-		Reasoning: staticReasoning{},
-	}}
-	var out bytes.Buffer
-	WriteHelp(&out, "agentrepl", cat)
-	help := out.String()
-	if !strings.Contains(help, "plain-model") || !strings.Contains(help, "(no reasoning control)") {
-		t.Fatalf("help = %q, want plain model with no-reasoning clause", help)
+	if got := reasoningClause(nil); got != "(no reasoning control)" {
+		t.Fatalf("reasoningClause(nil) = %q, want no-reasoning clause", got)
 	}
 }
 
@@ -285,22 +267,20 @@ func TestWriteHelpDoesNotConstructProviders(t *testing.T) {
 	// R-FY4I-I5SW
 	constructed := false
 	cat := []catalog.Provider{{
-		Name:   "credential-blind",
+		Name:   "unknown-catalog-provider",
 		EnvKey: "SECRET_KEY",
-		Models: []string{"model"},
-		New: func(string, catalog.Options) agentkit.Provider {
+		New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
 			constructed = true
-			return nil
+			return nil, nil
 		},
-		Reasoning: staticReasoning{},
 	}}
 	var out bytes.Buffer
 	WriteHelp(&out, "agentrepl", cat)
 	if constructed {
 		t.Fatal("WriteHelp constructed a provider")
 	}
-	if !strings.Contains(out.String(), "SECRET_KEY") || !strings.Contains(out.String(), "model") {
-		t.Fatalf("help = %q, want env-key documentation and model without credentials", out.String())
+	if !strings.Contains(out.String(), "SECRET_KEY") {
+		t.Fatalf("help = %q, want env-key documentation", out.String())
 	}
 }
 
@@ -462,7 +442,8 @@ func TestProvidersListsEnvPresenceAndModels(t *testing.T) {
 		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
 	}
 	for _, provider := range catalog.Default() {
-		if !strings.Contains(out, provider.Name) || !strings.Contains(out, provider.EnvKey) || !strings.Contains(out, provider.Models[0]) {
+		models := catalog.Models(provider.Name)
+		if len(models) == 0 || !strings.Contains(out, provider.Name) || !strings.Contains(out, provider.EnvKey) || !strings.Contains(out, models[0].Model) {
 			t.Fatalf("stdout = %q, want provider %s with env and models", out, provider.Name)
 		}
 	}
@@ -584,7 +565,7 @@ func TestWaiterStopsByDeferForErrorEmptyAndInterrupt(t *testing.T) {
 			name: "empty",
 			run: func(t *testing.T, calls *[]string) *state {
 				t.Helper()
-				empty := agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, nil)
+				empty := agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, nil, 0, true)
 				state := newWaiterTestState(calls, newScriptedProvider(empty))
 				handleTurn(context.Background(), state, "hello")
 				return state
@@ -697,7 +678,7 @@ func TestFailedTurnRendersErrorSkipsUsageAndContinues(t *testing.T) {
 func TestTurnWarningsRelayBeforeUsageAndError(t *testing.T) {
 	// R-G480-F0ID
 	warnings := []agentkit.Warning{
-		{Setting: "reasoning", Code: agentkit.WarnReasoningUnsupported, Detail: "xhigh is not supported"},
+		{Setting: "tool_choice", Code: agentkit.WarnToolChoiceForced, Detail: "forced tool choice was relaxed"},
 		{Setting: "tool_schema", Code: agentkit.WarnToolSchemaLossy, Detail: "dropped keyword"},
 	}
 	provider := newScriptedProvider(toolUseRoundWithWarnings(warnings), errorRound("provider failed"), successRound("after warning", usageOne()))
@@ -718,37 +699,6 @@ func TestTurnWarningsRelayBeforeUsageAndError(t *testing.T) {
 	second := records[5]
 	if second["Setting"] != warnings[1].Setting || second["Code"] != float64(warnings[1].Code) || second["Detail"] != warnings[1].Detail {
 		t.Fatalf("second warning = %#v, want verbatim %#v", second, warnings[1])
-	}
-}
-
-func TestNonNativeReasoningWarningRelayedAndTurnCompletesWithDefault(t *testing.T) {
-	// R-G6NT-6JZR
-	provider := &reasoningWarningProvider{}
-	result := runScriptWithProviderContext(t, context.Background(), "hello\n/exit\n", Options{
-		Raw:    true,
-		Config: []string{"effort=xhigh"},
-	}, provider)
-	if result.code != 0 {
-		t.Fatalf("Run exit code = %d, stderr %q", result.code, result.stderr)
-	}
-	if len(provider.requests) != 1 {
-		t.Fatalf("provider request count = %d, want 1", len(provider.requests))
-	}
-	if level, ok := provider.requests[0].Gen.Reasoning.Level(); !ok || level != "xhigh" {
-		t.Fatalf("request reasoning = %#v, want non-native level xhigh from config carve-out", provider.requests[0].Gen.Reasoning)
-	}
-	records := decodeLogRecords(t, result.stdout)
-	gotTypes := recordTypes(t, records)
-	wantTypes := []string{"prompt", "message_done", "warning", "usage", "summary"}
-	if !slices.Equal(gotTypes, wantTypes) {
-		t.Fatalf("stdout record types = %#v, want %#v\nstdout:\n%s", gotTypes, wantTypes, result.stdout)
-	}
-	warning := records[2]
-	if warning["Setting"] != "reasoning" || warning["Code"] != float64(agentkit.WarnReasoningUnsupported) {
-		t.Fatalf("warning record = %#v, want reasoning unsupported warning", warning)
-	}
-	if !strings.Contains(result.stdout, `"type":"usage"`) || strings.Contains(result.stdout, `"type":"error"`) {
-		t.Fatalf("stdout = %q, want completed turn with usage and no error", result.stdout)
 	}
 }
 
@@ -1005,9 +955,9 @@ func TestCommandTableSetPropagatesConfigSentinels(t *testing.T) {
 			Catalog: []catalog.Provider{{
 				Name:   "test",
 				EnvKey: "TEST_KEY",
-				New: func(string, catalog.Options) agentkit.Provider {
+				New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
 					t.Fatal("constructor should not be called for unknown provider")
-					return nil
+					return nil, nil
 				},
 			}},
 			Getenv: func(string) string { return "" },
@@ -1054,9 +1004,8 @@ func runScriptWithProvider(t *testing.T, script string, opts Options, provider *
 		return []catalog.Provider{{
 			Name:   "test",
 			EnvKey: "TEST_API_KEY",
-			Models: []string{"test-model"},
-			New: func(string, catalog.Options) agentkit.Provider {
-				return provider
+			New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
+				return provider, nil
 			},
 		}}
 	}
@@ -1124,9 +1073,8 @@ func runScriptWithProviderContextIOAndWaiter(t *testing.T, ctx context.Context, 
 		return []catalog.Provider{{
 			Name:   "test",
 			EnvKey: "TEST_API_KEY",
-			Models: []string{"test-model"},
-			New: func(string, catalog.Options) agentkit.Provider {
-				return provider
+			New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
+				return provider, nil
 			},
 		}}
 	}
@@ -1235,21 +1183,6 @@ type scriptedProvider struct {
 	requests []agentkit.Request
 }
 
-type staticReasoning map[string]agentkit.ReasoningSpec
-
-func (s staticReasoning) ReasoningSpec(model string) (agentkit.ReasoningSpec, bool) {
-	spec, ok := s[model]
-	return spec, ok
-}
-
-func (s staticReasoning) SupportedReasoning() map[string]agentkit.ReasoningSpec {
-	out := make(map[string]agentkit.ReasoningSpec, len(s))
-	for model, spec := range s {
-		out[model] = spec
-	}
-	return out
-}
-
 func newScriptedProvider(rounds ...*agentkit.RoundTrip) *scriptedProvider {
 	return &scriptedProvider{rounds: rounds}
 }
@@ -1298,7 +1231,7 @@ func (p *interruptProvider) RoundTrip(ctx context.Context, req *agentkit.Request
 		InputUncached: 999,
 		Output:        999,
 		Total:         1998,
-	}, nil, ctx.Err())
+	}, nil, ctx.Err(), 0, false)
 }
 
 func (p *interruptProvider) Name() string {
@@ -1326,7 +1259,7 @@ func newBlockingProvider() *blockingProvider {
 func (p *blockingProvider) RoundTrip(ctx context.Context, _ *agentkit.Request) *agentkit.RoundTrip {
 	close(p.started)
 	<-ctx.Done()
-	return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, ctx.Err())
+	return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, ctx.Err(), 0, false)
 }
 
 func (p *blockingProvider) Name() string {
@@ -1348,7 +1281,7 @@ func successRound(text string, usage agentkit.Usage) *agentkit.RoundTrip {
 		Role:   agentkit.RoleAssistant,
 		Blocks: []agentkit.Block{agentkit.TextBlock{Text: text}},
 	}
-	return agentkit.NewRoundTrip(message, agentkit.FinishStop, usage, nil, nil)
+	return agentkit.NewRoundTrip(message, agentkit.FinishStop, usage, nil, nil, costForUsage(usage), true)
 }
 
 func toolUseRound() *agentkit.RoundTrip {
@@ -1364,11 +1297,12 @@ func toolUseRoundWithWarnings(warnings []agentkit.Warning) *agentkit.RoundTrip {
 			Input: json.RawMessage(`{"path":"missing.txt"}`),
 		}},
 	}
-	return agentkit.NewRoundTrip(message, agentkit.FinishToolUse, usageOne(), warnings, nil)
+	usage := usageOne()
+	return agentkit.NewRoundTrip(message, agentkit.FinishToolUse, usage, warnings, nil, costForUsage(usage), true)
 }
 
 func errorRound(message string) *agentkit.RoundTrip {
-	return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, errors.New(message))
+	return agentkit.NewRoundTrip(agentkit.Message{}, agentkit.FinishStop, agentkit.Usage{}, nil, errors.New(message), 0, false)
 }
 
 func usageOne() agentkit.Usage {
@@ -1387,40 +1321,8 @@ func usageTwo() agentkit.Usage {
 	}
 }
 
-type reasoningWarningProvider struct {
-	requests []agentkit.Request
-}
-
-func (p *reasoningWarningProvider) RoundTrip(_ context.Context, req *agentkit.Request) *agentkit.RoundTrip {
-	p.requests = append(p.requests, *req)
-	level, ok := req.Gen.Reasoning.Level()
-	if !ok || level != "xhigh" {
-		return errorRound("missing non-native reasoning level")
-	}
-	message := agentkit.Message{
-		Role:   agentkit.RoleAssistant,
-		Blocks: []agentkit.Block{agentkit.TextBlock{Text: "defaulted"}},
-	}
-	warnings := []agentkit.Warning{{
-		Setting: "reasoning",
-		Code:    agentkit.WarnReasoningUnsupported,
-		Detail:  "xhigh is not supported by test-model; using high",
-	}}
-	return agentkit.NewRoundTrip(message, agentkit.FinishStop, usageOne(), warnings, nil)
-}
-
-func (p *reasoningWarningProvider) Name() string {
-	return "test"
-}
-
-func (p *reasoningWarningProvider) Pricing(model string) (agentkit.Pricing, bool) {
-	if model != "test-model" {
-		return agentkit.Pricing{}, false
-	}
-	return agentkit.Pricing{Tiers: []agentkit.RateTier{{
-		InputUncached: 10_000,
-		Output:        20_000,
-	}}}, true
+func costForUsage(usage agentkit.Usage) agentkit.Cost {
+	return agentkit.Cost(usage.InputUncached*10_000 + usage.Output*20_000)
 }
 
 func assertLogTypes(t *testing.T, log string, want []string) {

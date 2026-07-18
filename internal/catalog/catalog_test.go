@@ -5,262 +5,203 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/ikigenba/agentkit"
-	"github.com/ikigenba/agentkit/anthropic"
-	"github.com/ikigenba/agentkit/google"
-	"github.com/ikigenba/agentkit/openai"
-	"github.com/ikigenba/agentkit/zai"
+	akcatalog "github.com/ikigenba/agentkit/catalog"
 )
 
-type fakeProvider struct {
-	name string
-}
-
-func (p fakeProvider) RoundTrip(context.Context, *agentkit.Request) *agentkit.RoundTrip {
-	return nil
-}
-
-func (p fakeProvider) Name() string {
-	return p.name
-}
-
-func (p fakeProvider) Pricing(string) (agentkit.Pricing, bool) {
-	return agentkit.Pricing{}, false
-}
-
-func TestDefaultProvidersHaveContractualNamesEnvKeysAndModels(t *testing.T) {
-	// R-OVEC-4AWS
-	// R-OXU4-VUE6
-	got := Default()
+func TestDefaultProvidersAndLookup(t *testing.T) {
+	// R-4IL7-JPW0
 	want := []struct {
 		name   string
 		envKey string
 	}{
-		{name: "anthropic", envKey: "ANTHROPIC_API_KEY"},
-		{name: "google", envKey: "GEMINI_API_KEY"},
-		{name: "openai", envKey: "OPENAI_API_KEY"},
-		{name: "zai", envKey: "ZAI_API_KEY"},
+		{"anthropic", "ANTHROPIC_API_KEY"},
+		{"google", "GEMINI_API_KEY"},
+		{"openai", "OPENAI_API_KEY"},
+		{"openrouter", "OPENROUTER_API_KEY"},
+		{"zai", "ZAI_API_KEY"},
 	}
-
+	got := Default()
 	if len(got) != len(want) {
 		t.Fatalf("Default() returned %d providers, want %d", len(got), len(want))
 	}
 	for i, provider := range got {
-		if provider.Name != want[i].name {
-			t.Fatalf("Default()[%d].Name = %q, want %q", i, provider.Name, want[i].name)
+		if provider.Name != want[i].name || provider.EnvKey != want[i].envKey {
+			t.Errorf("Default()[%d] = %q/%q, want %q/%q", i, provider.Name, provider.EnvKey, want[i].name, want[i].envKey)
 		}
-		if provider.EnvKey != want[i].envKey {
-			t.Fatalf("Default()[%d].EnvKey = %q, want %q", i, provider.EnvKey, want[i].envKey)
+	}
+	if _, ok := Lookup(got, "unknown"); ok {
+		t.Fatal("Lookup(unknown) reported found")
+	}
+}
+
+func TestDefaultAuthMethods(t *testing.T) {
+	// R-4JT3-XHMP
+	for _, provider := range Default() {
+		want := []AuthMethod{AuthKey}
+		if provider.Name == "openai" {
+			want = []AuthMethod{AuthSub, AuthKey}
 		}
-		if len(provider.Models) == 0 {
-			t.Fatalf("Default()[%d].Models is empty", i)
+		if !reflect.DeepEqual(provider.Methods, want) {
+			t.Errorf("%s methods = %v, want %v", provider.Name, provider.Methods, want)
 		}
 	}
 }
 
-func TestDefaultModelsAreAcceptedByConstructedProviderPricing(t *testing.T) {
-	// R-OWM8-I2NH
+func TestKeyAuthConstructsAndMissingKeyIsClassified(t *testing.T) {
+	// R-4L10-B9DE
 	for _, provider := range Default() {
-		constructed := provider.New("test-key", Options{})
-		if constructed == nil {
-			t.Fatalf("%s constructor returned nil", provider.Name)
+		got, err := provider.New(func(string) string { return "secret" }, Options{Auth: AuthKey})
+		if err != nil || got == nil {
+			t.Errorf("%s key construction = %#v, %v; want non-nil provider", provider.Name, got, err)
 		}
-		for _, model := range provider.Models {
-			if _, ok := constructed.Pricing(model); !ok {
-				t.Fatalf("%s Pricing(%q) ok=false", provider.Name, model)
+
+		got, err = provider.New(func(string) string { return "" }, Options{Auth: AuthKey})
+		if got != nil || !errors.Is(err, ErrMissingKey) || !strings.Contains(err.Error(), provider.EnvKey) {
+			t.Errorf("%s missing key = %#v, %v; want nil and ErrMissingKey naming %s", provider.Name, got, err, provider.EnvKey)
+		}
+	}
+}
+
+func TestSubscriptionAuthAndUnsupportedMethods(t *testing.T) {
+	// R-4M8W-P143
+	provider, _ := Lookup(Default(), "openai")
+	path := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(path, []byte(`{"tokens":{"access_token":"header.payload.signature","account_id":"acct"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := provider.New(func(string) string { return "" }, Options{Auth: AuthSub, AuthFile: path})
+	if err != nil || got == nil {
+		t.Fatalf("subscription construction = %#v, %v; want non-nil provider", got, err)
+	}
+
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	got, err = provider.New(func(string) string { return "" }, Options{Auth: AuthSub, AuthFile: missing})
+	if got != nil || err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing auth file = %#v, %v; want nil error naming path", got, err)
+	}
+	malformed := filepath.Join(t.TempDir(), "malformed.json")
+	if err := os.WriteFile(malformed, []byte(`{"tokens":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = provider.New(func(string) string { return "" }, Options{Auth: AuthSub, AuthFile: malformed})
+	if got != nil || err == nil || !strings.Contains(err.Error(), malformed) {
+		t.Fatalf("malformed auth file = %#v, %v; want nil error naming path", got, err)
+	}
+
+	for _, candidate := range Default() {
+		got, err := candidate.New(func(string) string { return "secret" }, Options{Auth: "other"})
+		if got != nil || !errors.Is(err, ErrAuthUnsupported) || !strings.Contains(err.Error(), candidate.Name) || !strings.Contains(err.Error(), "other") {
+			t.Errorf("%s unsupported auth = %#v, %v", candidate.Name, got, err)
+		}
+	}
+}
+
+func TestModelsAreSortedAgentkitChatEntries(t *testing.T) {
+	// R-4NGT-2SUS
+	for _, provider := range Default() {
+		var want []akcatalog.Entry
+		for _, entry := range akcatalog.ListByProvider(provider.Name) {
+			if entry.Embedding == nil {
+				want = append(want, entry)
 			}
 		}
+		if got := Models(provider.Name); !reflect.DeepEqual(got, want) {
+			t.Errorf("Models(%q) differs from filtered agentkit catalog", provider.Name)
+		}
+	}
+	foundGLMRoute := false
+	for _, entry := range Models("openrouter") {
+		if entry.Model == "glm-5.2" {
+			foundGLMRoute = true
+		}
+	}
+	if !foundGLMRoute {
+		t.Fatal("Models(openrouter) does not include routed glm-5.2")
 	}
 }
 
-func TestDefaultProvidersSetCredentialBlindReasoningInspectors(t *testing.T) {
-	// R-FQT4-7JCQ
-	want := map[string]agentkit.ReasoningInspector{
-		"anthropic": anthropic.Reasoning,
-		"google":    google.Reasoning,
-		"openai":    openai.Reasoning,
-		"zai":       zai.Reasoning,
+func TestResolveDerivesAndRoutesModels(t *testing.T) {
+	// R-4OOP-GKLH
+	models := Models("anthropic")
+	if len(models) == 0 {
+		t.Fatal("anthropic has no chat models")
 	}
-	for _, provider := range Default() {
-		if provider.Reasoning == nil {
-			t.Fatalf("%s Reasoning is nil", provider.Name)
-		}
-		if provider.Reasoning != want[provider.Name] {
-			t.Fatalf("%s Reasoning = %#v, want its package introspector", provider.Name, provider.Reasoning)
-		}
-		spec, ok := provider.Reasoning.ReasoningSpec(provider.Models[0])
-		if !ok {
-			t.Fatalf("%s ReasoningSpec(%q) ok=false", provider.Name, provider.Models[0])
-		}
-		if spec.Term == "" {
-			t.Fatalf("%s ReasoningSpec(%q).Term is empty", provider.Name, provider.Models[0])
-		}
+	provider, wire, entry, ok := Resolve("", models[0].Model)
+	if !ok || provider != models[0].Provider || wire != models[0].Model || entry.Model != models[0].Model {
+		t.Fatalf("Resolve home = %q/%q/%q/%v", provider, wire, entry.Model, ok)
+	}
+	provider, wire, entry, ok = Resolve("openrouter", "glm-5.2")
+	if !ok || provider != "openrouter" || wire != "z-ai/glm-5.2" || entry.Model != "glm-5.2" {
+		t.Fatalf("Resolve GLM route = %q/%q/%q/%v", provider, wire, entry.Model, ok)
+	}
+	if _, _, _, ok := Resolve("openai", "not-cataloged"); ok {
+		t.Fatal("Resolve uncataloged model reported ok")
 	}
 }
 
-func TestDefaultModelsResolveReasoningSpecs(t *testing.T) {
-	// R-FS10-LB3F
-	for _, provider := range Default() {
-		if provider.Reasoning == nil {
-			t.Fatalf("%s Reasoning is nil", provider.Name)
+func TestResolveCarriesPricing(t *testing.T) {
+	// R-4PWL-UCC6
+	var priced akcatalog.Entry
+	for _, entry := range Models("openai") {
+		if entry.Pricing != nil {
+			priced = entry
+			break
 		}
-		for _, model := range provider.Models {
-			spec, ok := provider.Reasoning.ReasoningSpec(model)
-			if !ok {
-				t.Fatalf("%s ReasoningSpec(%q) ok=false", provider.Name, model)
-			}
-			if spec.Term == "" {
-				t.Fatalf("%s ReasoningSpec(%q).Term is empty", provider.Name, model)
-			}
-		}
+	}
+	if priced.Model == "" {
+		t.Fatal("openai catalog contains no priced chat model")
+	}
+	_, _, got, ok := Resolve("openai", priced.Model)
+	if !ok || got.Pricing == nil || !reflect.DeepEqual(got.Pricing, priced.Pricing) {
+		t.Fatalf("resolved pricing = %#v/%v, want %#v", got.Pricing, ok, priced.Pricing)
+	}
+	_, _, got, ok = Resolve("openai", "not-cataloged")
+	if ok || !reflect.DeepEqual(got, akcatalog.Entry{}) {
+		t.Fatalf("uncataloged entry = %#v/%v, want zero/false", got, ok)
 	}
 }
 
-func TestBuildMissingKeyWrapsSentinelNamesEnvAndDoesNotConstruct(t *testing.T) {
-	// R-OZ21-9M4V
-	calls := 0
-	provider := Provider{
-		Name:   "test",
-		EnvKey: "TEST_API_KEY",
-		New: func(string, Options) agentkit.Provider {
-			calls++
-			return fakeProvider{name: "test"}
-		},
-	}
-
-	got, err := provider.Build(func(string) string { return "" }, Options{})
-	if got != nil {
-		t.Fatalf("Build returned provider %#v, want nil", got)
-	}
-	if !errors.Is(err, ErrMissingKey) {
-		t.Fatalf("Build error = %v, want wrapping ErrMissingKey", err)
-	}
-	if !strings.Contains(err.Error(), provider.EnvKey) {
-		t.Fatalf("Build error = %q, want it to name %q", err.Error(), provider.EnvKey)
-	}
-	if calls != 0 {
-		t.Fatalf("constructor called %d times, want 0", calls)
-	}
-}
-
-func TestBuildConstructsProviderWhenKeyIsPresent(t *testing.T) {
-	// R-P09X-NDVK
-	var gotKey string
-	var gotOptions Options
-	wantProvider := fakeProvider{name: "test"}
-	provider := Provider{
-		Name:   "test",
-		EnvKey: "TEST_API_KEY",
-		New: func(apiKey string, opts Options) agentkit.Provider {
-			gotKey = apiKey
-			gotOptions = opts
-			return wantProvider
-		},
-	}
-
-	got, err := provider.Build(func(key string) string {
-		if key != provider.EnvKey {
-			t.Fatalf("getenv key = %q, want %q", key, provider.EnvKey)
-		}
-		return "secret"
-	}, Options{BaseURL: "https://example.test"})
-	if err != nil {
-		t.Fatalf("Build returned error: %v", err)
-	}
-	if got == nil {
-		t.Fatal("Build returned nil provider")
-	}
-	if got.Name() != wantProvider.Name() {
-		t.Fatalf("Build provider name = %q, want %q", got.Name(), wantProvider.Name())
-	}
-	if gotKey != "secret" {
-		t.Fatalf("constructor apiKey = %q, want %q", gotKey, "secret")
-	}
-	if gotOptions.BaseURL != "https://example.test" {
-		t.Fatalf("constructor options BaseURL = %q, want override", gotOptions.BaseURL)
-	}
-}
-
-func TestBuildOptionsApplyOnlyToZAIBaseURL(t *testing.T) {
-	// R-S94E-8K1O
+func TestBaseURLAppliesToEveryProvider(t *testing.T) {
+	// R-4R4I-842V
 	transport := &recordingTransport{}
 	original := http.DefaultTransport
 	http.DefaultTransport = transport
 	t.Cleanup(func() { http.DefaultTransport = original })
 
-	overrideRoot := "https://override.example.test/root"
-	cases := []struct {
-		name             string
-		model            string
-		wantOverrideRoot bool
-	}{
-		{name: "anthropic", model: anthropic.ModelHaiku45},
-		{name: "google", model: google.ModelFlash25},
-		{name: "openai", model: openai.ModelGPT54Nano},
-		{name: "zai", model: zai.ModelGLM46, wantOverrideRoot: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			provider, ok := Lookup(Default(), tc.name)
-			if !ok {
-				t.Fatalf("Lookup(%q) ok=false", tc.name)
-			}
-			constructed, err := provider.Build(func(string) string { return "test-key" }, Options{BaseURL: overrideRoot})
-			if err != nil {
-				t.Fatalf("Build returned error: %v", err)
-			}
-			before := len(transport.urls)
-			rt := constructed.RoundTrip(context.Background(), &agentkit.Request{Model: tc.model})
-			if rt == nil {
-				t.Fatal("RoundTrip returned nil")
-			}
-			if len(transport.urls) != before+1 {
-				t.Fatalf("recorded URLs = %v, want one new request", transport.urls)
-			}
-			got := transport.urls[len(transport.urls)-1]
-			gotOverride := strings.HasPrefix(got, overrideRoot+"/")
-			if gotOverride != tc.wantOverrideRoot {
-				t.Fatalf("%s requested %q, override root used=%v want %v", tc.name, got, gotOverride, tc.wantOverrideRoot)
-			}
-		})
+	const override = "https://override.example.test/root"
+	for _, provider := range Default() {
+		models := Models(provider.Name)
+		if len(models) == 0 {
+			t.Fatalf("%s has no chat models", provider.Name)
+		}
+		constructed, err := provider.New(func(string) string { return "secret" }, Options{Auth: AuthKey, BaseURL: override})
+		if err != nil {
+			t.Fatalf("construct %s: %v", provider.Name, err)
+		}
+		before := len(transport.urls)
+		_ = constructed.RoundTrip(context.Background(), &agentkit.Request{Model: models[0].Model})
+		if len(transport.urls) != before+1 || !strings.HasPrefix(transport.urls[before], override+"/") {
+			t.Errorf("%s request URLs = %v, want override prefix", provider.Name, transport.urls[before:])
+		}
 	}
 
-	provider, ok := Lookup(Default(), "zai")
-	if !ok {
-		t.Fatal("Lookup(zai) ok=false")
-	}
-	constructed, err := provider.Build(func(string) string { return "test-key" }, Options{})
-	if err != nil {
-		t.Fatalf("Build zai default returned error: %v", err)
-	}
-	before := len(transport.urls)
-	_ = constructed.RoundTrip(context.Background(), &agentkit.Request{Model: zai.ModelGLM46})
-	if len(transport.urls) != before+1 {
-		t.Fatalf("recorded URLs = %v, want one new request", transport.urls)
-	}
-	if strings.HasPrefix(transport.urls[len(transport.urls)-1], overrideRoot+"/") {
-		t.Fatalf("zai default requested override URL %q", transport.urls[len(transport.urls)-1])
-	}
-}
-
-func TestLookupAndHasModelReportMembership(t *testing.T) {
-	// R-P1HU-15M9
-	cat := Default()
-	provider, ok := Lookup(cat, "anthropic")
-	if !ok {
-		t.Fatal("Lookup(anthropic) ok=false, want true")
-	}
-	if _, ok := Lookup(cat, "missing"); ok {
-		t.Fatal("Lookup(missing) ok=true, want false")
-	}
-	if !provider.HasModel(provider.Models[0]) {
-		t.Fatalf("HasModel(%q) = false, want true", provider.Models[0])
-	}
-	if provider.HasModel("not-a-curated-model") {
-		t.Fatal("HasModel(not-a-curated-model) = true, want false")
+	for _, provider := range Default() {
+		constructed, err := provider.New(func(string) string { return "secret" }, Options{Auth: AuthKey})
+		if err != nil {
+			t.Fatalf("construct default %s: %v", provider.Name, err)
+		}
+		before := len(transport.urls)
+		_ = constructed.RoundTrip(context.Background(), &agentkit.Request{Model: Models(provider.Name)[0].Model})
+		if len(transport.urls) != before+1 || strings.HasPrefix(transport.urls[before], override) {
+			t.Errorf("%s empty BaseURL used override: %v", provider.Name, transport.urls[before:])
+		}
 	}
 }
 
