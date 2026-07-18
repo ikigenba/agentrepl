@@ -39,14 +39,23 @@ models:
     gpt-5.6-sol              effort={none|low|*medium|high|xhigh}
     gpt-5.6-terra            effort={none|low|*medium|high|xhigh}
   openrouter
+    deepseek-v4-flash        thinking={*on|off}
+    deepseek-v4-pro          thinking={*on|off}
     glm-4.6  -> z-ai/glm-4.6  thinking={*on|off}
     glm-4.7  -> z-ai/glm-4.7  thinking={*on|off}
-    glm-5.1  -> z-ai/glm-5.1  effort={high|*max}  (+ toggle)
+    glm-5.1  -> z-ai/glm-5.1  thinking={*on|off}
     glm-5.2  -> z-ai/glm-5.2  effort={high|*max}  (+ toggle)
+    grok-4.20                thinking={*on|off}
+    grok-4.20-multi-agent    thinking={*on|off}
+    grok-4.3                 thinking={*on|off}
+    grok-4.5                 thinking={*on|off}
+    kimi-k2.6                thinking={*on|off}
+    kimi-k2.7-code           thinking={*on|off}
+    kimi-k3                  thinking={*on|off}
   zai
     glm-4.6                  thinking={*on|off}
     glm-4.7                  thinking={*on|off}
-    glm-5.1                  effort={high|*max}  (+ toggle)
+    glm-5.1                  thinking={*on|off}
     glm-5.2                  effort={high|*max}  (+ toggle)
 
 a bare -c model=NAME must name a cataloged model (provider is derived from it).
