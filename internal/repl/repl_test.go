@@ -357,8 +357,7 @@ func TestRuntimeConfigCommandsReachConfigAndSurviveErrors(t *testing.T) {
 	for _, want := range []string{
 		"system=You are helpful",
 		"tool_loop_limit=default",
-		"missing API key",
-		"provider=default",
+		"provider=anthropic",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout = %q, want %q", out, want)
@@ -458,8 +457,8 @@ func TestTurnPrecheckHintsBeforeProviderAndModel(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
 	}
-	if !strings.Contains(out, "set a provider and model first") {
-		t.Fatalf("stdout = %q, want provider/model hint", out)
+	if !strings.Contains(out, "load subscription auth file") {
+		t.Fatalf("stdout = %q, want lazy provider construction error", out)
 	}
 	if strings.Contains(out, "turn execution is not available") {
 		t.Fatalf("stdout = %q, turn handler ran despite failed pre-check", out)
@@ -688,15 +687,15 @@ func TestTurnWarningsRelayBeforeUsageAndError(t *testing.T) {
 	}
 	records := decodeLogRecords(t, out)
 	gotTypes := recordTypes(t, records)
-	wantTypes := []string{"prompt", "message_done", "tool_use", "tool_result", "warning", "warning", "error", "prompt", "message_done", "usage", "summary"}
+	wantTypes := []string{"notice", "prompt", "message_done", "tool_use", "tool_result", "warning", "warning", "error", "prompt", "message_done", "usage", "summary"}
 	if !slices.Equal(gotTypes, wantTypes) {
 		t.Fatalf("stdout record types = %#v, want %#v\nstdout:\n%s", gotTypes, wantTypes, out)
 	}
-	first := records[4]
+	first := records[5]
 	if first["Setting"] != warnings[0].Setting || first["Code"] != float64(warnings[0].Code) || first["Detail"] != warnings[0].Detail {
 		t.Fatalf("first warning = %#v, want verbatim %#v", first, warnings[0])
 	}
-	second := records[5]
+	second := records[6]
 	if second["Setting"] != warnings[1].Setting || second["Code"] != float64(warnings[1].Code) || second["Detail"] != warnings[1].Detail {
 		t.Fatalf("second warning = %#v, want verbatim %#v", second, warnings[1])
 	}
@@ -870,7 +869,7 @@ func TestSessionLogIsIndependentOfRenderMode(t *testing.T) {
 
 func TestRuntimeSelectionErrorWritesStdoutAndStartupFatalWritesStderr(t *testing.T) {
 	// R-HB5I-QYZH
-	out, errOut, code := runScript(t, "/set provider anthropic\n/exit\n", Options{})
+	out, errOut, code := runScript(t, "/set provider anthropic\nhello\n/exit\n", Options{})
 	if code != 0 {
 		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
 	}
@@ -952,7 +951,7 @@ func TestCommandTableSetPropagatesConfigSentinels(t *testing.T) {
 		conv: conv,
 		target: &config.Target{
 			Conv: conv,
-			Catalog: []catalog.Provider{{
+			Cat: []catalog.Provider{{
 				Name:   "test",
 				EnvKey: "TEST_KEY",
 				New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {

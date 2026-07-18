@@ -43,7 +43,11 @@ func init() {
 				if !ok || key == "" {
 					return fmt.Errorf("usage: /set <key> <value>")
 				}
-				return config.Set(s.target, key, value)
+				notice, err := config.Set(s.target, key, value)
+				if notice != "" {
+					s.rend.Notice(notice)
+				}
+				return err
 			},
 		},
 		"get": {

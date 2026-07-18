@@ -5,767 +5,266 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ikigenba/agentkit"
+	akcatalog "github.com/ikigenba/agentkit/catalog"
 	"github.com/ikigenba/agentrepl/internal/catalog"
 )
 
-func TestSetCoercesEveryKnownKeyToTypedTargetField(t *testing.T) {
-	// R-LYK7-Y7ZS
-	cases := []struct {
-		key    string
-		raw    string
-		assert func(*testing.T, *Target)
-	}{
-		{
-			key: "provider",
-			raw: "test",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Provider == nil || target.Conv.Provider.Name() != "test" {
-					t.Fatalf("provider = %v, want named provider", target.Conv.Provider)
-				}
-			},
-		},
-		{
-			key: "model",
-			raw: "loose-model",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Model != "loose-model" {
-					t.Fatalf("model = %q, want loose-model", target.Conv.Model)
-				}
-			},
-		},
-		{
-			key: "system",
-			raw: "be concise",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.System != "be concise" {
-					t.Fatalf("system = %q, want be concise", target.Conv.System)
-				}
-			},
-		},
-		{
-			key: "temperature",
-			raw: "0.25",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Gen.Temperature == nil || *target.Conv.Gen.Temperature != 0.25 {
-					t.Fatalf("temperature = %v, want 0.25", target.Conv.Gen.Temperature)
-				}
-			},
-		},
-		{
-			key: "top_p",
-			raw: "0.9",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Gen.TopP == nil || *target.Conv.Gen.TopP != 0.9 {
-					t.Fatalf("top_p = %v, want 0.9", target.Conv.Gen.TopP)
-				}
-			},
-		},
-		{
-			key: "max_tokens",
-			raw: "2048",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Gen.MaxTokens != 2048 {
-					t.Fatalf("max_tokens = %d, want 2048", target.Conv.Gen.MaxTokens)
-				}
-			},
-		},
-		{
-			key: "effort",
-			raw: "xhigh",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Gen.Reasoning != agentkit.Level("xhigh") {
-					t.Fatalf("reasoning = %v, want xhigh level", target.Conv.Gen.Reasoning)
-				}
-				if target.ReasoningRaw != "xhigh" || target.ReasoningKey != "effort" {
-					t.Fatalf("reasoning display = %q/%q, want xhigh/effort", target.ReasoningRaw, target.ReasoningKey)
-				}
-			},
-		},
-		{
-			key: "thinking_budget",
-			raw: "8000",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Gen.Reasoning != agentkit.Budget(8000) {
-					t.Fatalf("reasoning = %v, want budget 8000", target.Conv.Gen.Reasoning)
-				}
-				if target.ReasoningRaw != "8000" || target.ReasoningKey != "thinking_budget" {
-					t.Fatalf("reasoning display = %q/%q, want 8000/thinking_budget", target.ReasoningRaw, target.ReasoningKey)
-				}
-			},
-		},
-		{
-			key: "thinking_level",
-			raw: "high",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Gen.Reasoning != agentkit.Level("high") {
-					t.Fatalf("reasoning = %v, want high level", target.Conv.Gen.Reasoning)
-				}
-				if target.ReasoningRaw != "high" || target.ReasoningKey != "thinking_level" {
-					t.Fatalf("reasoning display = %q/%q, want high/thinking_level", target.ReasoningRaw, target.ReasoningKey)
-				}
-			},
-		},
-		{
-			key: "thinking",
-			raw: "off",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Gen.Reasoning != agentkit.DisableReasoning() {
-					t.Fatalf("reasoning = %v, want disable", target.Conv.Gen.Reasoning)
-				}
-				if target.ReasoningRaw != "off" || target.ReasoningKey != "thinking" {
-					t.Fatalf("reasoning display = %q/%q, want off/thinking", target.ReasoningRaw, target.ReasoningKey)
-				}
-			},
-		},
-		{
-			key: "max_attempts",
-			raw: "5",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Retry.MaxAttempts != 5 {
-					t.Fatalf("max_attempts = %d, want 5", target.Conv.Retry.MaxAttempts)
-				}
-			},
-		},
-		{
-			key: "base_delay",
-			raw: "500ms",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Retry.BaseDelay != 500*time.Millisecond {
-					t.Fatalf("base_delay = %v, want 500ms", target.Conv.Retry.BaseDelay)
-				}
-			},
-		},
-		{
-			key: "max_delay",
-			raw: "3s",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Retry.MaxDelay != 3*time.Second {
-					t.Fatalf("max_delay = %v, want 3s", target.Conv.Retry.MaxDelay)
-				}
-			},
-		},
-		{
-			key: "max_elapsed",
-			raw: "1m30s",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.Retry.MaxElapsed != 90*time.Second {
-					t.Fatalf("max_elapsed = %v, want 1m30s", target.Conv.Retry.MaxElapsed)
-				}
-			},
-		},
-		{
-			key: "ignore_retry_after",
-			raw: "true",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if !target.Conv.Retry.IgnoreRetryAfter {
-					t.Fatal("ignore_retry_after = false, want true")
-				}
-			},
-		},
-		{
-			key: "tool_loop_limit",
-			raw: "12",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.Conv.MaxToolIterations != 12 {
-					t.Fatalf("tool_loop_limit = %d, want 12", target.Conv.MaxToolIterations)
-				}
-			},
-		},
-		{
-			key: "base_url",
-			raw: "https://api.z.ai/api/coding/paas/v4",
-			assert: func(t *testing.T, target *Target) {
-				t.Helper()
-				if target.ZaiBaseURL != "https://api.z.ai/api/coding/paas/v4" {
-					t.Fatalf("ZaiBaseURL = %q, want override", target.ZaiBaseURL)
-				}
-			},
-		},
+func TestNewTargetSeedsResolvedDefaultsWithoutConstructing(t *testing.T) {
+	// R-4X80-4YSC
+	builds := 0
+	conv := &agentkit.Conversation{}
+	target := NewTarget(conv, testCatalog(&builds, nil), func(string) string { return "" }, "/auth/default.json")
+	entry, _ := akcatalog.Lookup(defaultModel)
+	if target.ProviderName != "openai" || target.ProviderExplicit || target.ModelName != defaultModel || target.Auth != "" || target.AuthFile != "/auth/default.json" {
+		t.Fatalf("seeded target = %#v", target)
 	}
+	if conv.Model != defaultModel || !reflect.DeepEqual(conv.Pricing, entry.Pricing) || conv.Provider != nil || builds != 0 {
+		t.Fatalf("conversation seed model/pricing/provider/builds = %q/%v/%v/%d", conv.Model, conv.Pricing, conv.Provider, builds)
+	}
+	want := []string{"auth=default", "auth_file=/auth/default.json", "base_delay=default", "base_url=default", "effort=default", "ignore_retry_after=default", "max_attempts=default", "max_delay=default", "max_elapsed=default", "max_tokens=default", "model=gpt-5.6-sol", "provider=openai", "system=default", "temperature=default", "thinking=default", "thinking_budget=default", "thinking_level=default", "tool_loop_limit=default", "top_p=default"}
+	if !reflect.DeepEqual(Dump(target), want) {
+		t.Fatalf("Dump = %v, want %v", Dump(target), want)
+	}
+}
 
-	if len(cases) != len(Keys()) {
-		t.Fatalf("coercion cases = %d, want one per key: %v", len(cases), Keys())
-	}
-	seen := map[string]bool{}
-	for _, tc := range cases {
-		t.Run(tc.key, func(t *testing.T) {
-			seen[tc.key] = true
-			target := newTarget()
-			if err := Set(target, tc.key, tc.raw); err != nil {
-				t.Fatalf("Set(%q, %q) returned error: %v", tc.key, tc.raw, err)
-			}
-			tc.assert(t, target)
-		})
+func TestDefaultRestoresSeededAndZeroState(t *testing.T) {
+	// R-4YFW-IQJ1
+	target := NewTarget(&agentkit.Conversation{}, testCatalog(new(int), nil), nil, "/default-auth")
+	for _, pair := range [][2]string{{"provider", "zai"}, {"model", "free"}, {"auth", "key"}, {"auth_file", "/other"}, {"base_url", "https://example.test"}, {"system", "x"}, {"temperature", "1"}, {"top_p", ".5"}, {"max_tokens", "2"}, {"max_attempts", "3"}, {"base_delay", "1s"}, {"max_delay", "2s"}, {"max_elapsed", "3s"}, {"ignore_retry_after", "true"}, {"tool_loop_limit", "4"}, {"effort", "wild"}} {
+		if _, err := Set(target, pair[0], pair[1]); err != nil {
+			t.Fatalf("Set %v: %v", pair, err)
+		}
 	}
 	for _, key := range Keys() {
-		if !seen[key] {
-			t.Fatalf("missing coercion case for %s", key)
+		if _, err := Set(target, key, "default"); err != nil {
+			t.Fatalf("reset %s: %v", key, err)
+		}
+	}
+	if target.ProviderName != defaultProvider || target.ProviderExplicit || target.ModelName != defaultModel || target.Auth != "" || target.AuthFile != "/default-auth" {
+		t.Fatalf("seeded fields not restored: %#v", target)
+	}
+	for _, line := range Dump(target) {
+		if strings.HasPrefix(line, "provider=") || strings.HasPrefix(line, "model=") || strings.HasPrefix(line, "auth_file=") {
+			continue
+		}
+		if !strings.HasSuffix(line, "=default") {
+			t.Fatalf("non-seed value did not reset: %s", line)
 		}
 	}
 }
 
-func TestUnknownKeyWrapsSentinelAndMutatesNothing(t *testing.T) {
-	// R-LZS4-BZQH
-	for _, key := range []string{"missing.key", "gen.temperature", "gen.reasoning", "retry.max_attempts", "zai.base_url"} {
+func TestBadValuesNameKeyWrapSentinelAndMutateNothing(t *testing.T) {
+	// R-4ZNS-WI9Q
+	for _, key := range Keys() {
 		t.Run(key, func(t *testing.T) {
-			target := newTarget()
-			target.Conv.System = "original"
-			before := *target.Conv
-
-			err := Set(target, key, "value")
-			if !errors.Is(err, ErrUnknownKey) {
-				t.Fatalf("Set unknown key error = %v, want ErrUnknownKey", err)
-			}
-			if !strings.Contains(err.Error(), key) {
-				t.Fatalf("unknown key error = %q, want key name", err)
-			}
-			if !reflect.DeepEqual(before, *target.Conv) {
-				t.Fatalf("conversation mutated: before=%#v after=%#v", before, *target.Conv)
+			target := NewTarget(&agentkit.Conversation{}, testCatalog(new(int), nil), nil, "/auth")
+			before := Dump(target)
+			_, err := Set(target, key, "")
+			if !errors.Is(err, ErrBadValue) || !strings.Contains(err.Error(), key) || !reflect.DeepEqual(Dump(target), before) {
+				t.Fatalf("Set empty error/state = %v/%v, want ErrBadValue and unchanged", err, Dump(target))
 			}
 		})
 	}
-}
-
-func TestBadValueWrapsSentinelNamesKeyAndMutatesNothing(t *testing.T) {
-	// R-M100-PRH6
-	for _, tc := range []struct {
-		key    string
-		raw    string
-		reason string
-	}{
-		{key: "temperature", raw: "not-a-float", reason: "invalid syntax"},
-		{key: "max_tokens", raw: "not-an-int", reason: "invalid syntax"},
-		{key: "base_delay", raw: "soon", reason: "invalid duration"},
-		{key: "ignore_retry_after", raw: "maybe", reason: "invalid syntax"},
-		{key: "tool_loop_limit", raw: "none", reason: "invalid syntax"},
-	} {
-		t.Run(tc.key, func(t *testing.T) {
-			target := newTarget()
-			target.Conv.System = "unchanged"
-			before := *target.Conv
-
-			err := Set(target, tc.key, tc.raw)
-			if !errors.Is(err, ErrBadValue) {
-				t.Fatalf("Set bad value error = %v, want ErrBadValue", err)
-			}
-			if !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), tc.reason) {
-				t.Fatalf("bad value error = %q, want key and parse reason", err)
-			}
-			if !reflect.DeepEqual(before, *target.Conv) {
-				t.Fatalf("conversation mutated: before=%#v after=%#v", before, *target.Conv)
-			}
-		})
-	}
-}
-
-func TestDefaultResetsUnsetValuesAndRendersDefault(t *testing.T) {
-	// R-M27X-3J7V
-	target := newTarget()
-	if err := Set(target, "temperature", "0.8"); err != nil {
-		t.Fatalf("set temperature: %v", err)
-	}
-	if err := Set(target, "effort", "high"); err != nil {
-		t.Fatalf("set reasoning: %v", err)
-	}
-
-	if err := Set(target, "temperature", "default"); err != nil {
-		t.Fatalf("default temperature: %v", err)
-	}
-	if err := Set(target, "thinking_budget", "default"); err != nil {
-		t.Fatalf("default reasoning: %v", err)
-	}
-
-	if target.Conv.Gen.Temperature != nil {
-		t.Fatalf("temperature = %v, want nil", target.Conv.Gen.Temperature)
-	}
-	if target.Conv.Gen.Reasoning != (agentkit.ReasoningValue{}) {
-		t.Fatalf("reasoning = %v, want zero value", target.Conv.Gen.Reasoning)
-	}
-	if target.ReasoningRaw != "" {
-		t.Fatalf("ReasoningRaw = %q, want empty", target.ReasoningRaw)
-	}
-	if target.ReasoningKey != "" {
-		t.Fatalf("ReasoningKey = %q, want empty", target.ReasoningKey)
-	}
-	for _, key := range []string{"temperature", "effort", "thinking_budget"} {
-		got, ok := Get(target, key)
-		if !ok || got != "default" {
-			t.Fatalf("Get(%q) = %q, %v; want default, true", key, got, ok)
-		}
-		line := key + "=default"
-		if !slices.Contains(Dump(target), line) {
-			t.Fatalf("Dump missing %q: %v", line, Dump(target))
+	for _, pair := range [][2]string{{"thinking_budget", "many"}, {"thinking", "maybe"}} {
+		target := NewTarget(&agentkit.Conversation{}, testCatalog(new(int), nil), nil, "/auth")
+		if _, err := Set(target, pair[0], pair[1]); !errors.Is(err, ErrBadValue) {
+			t.Fatalf("Set %v = %v, want ErrBadValue", pair, err)
 		}
 	}
 }
 
-func TestProviderAndModelCouplingUsesCatalogErrors(t *testing.T) {
-	// R-M3FT-HAYK
-	t.Run("provider builds through catalog", func(t *testing.T) {
-		target := newTarget()
-		if err := Set(target, "provider", "test"); err != nil {
-			t.Fatalf("Set provider returned error: %v", err)
+func TestImplicitProviderModelResolutionAndUnknownRejection(t *testing.T) {
+	// R-50VP-AA0F
+	target := NewTarget(&agentkit.Conversation{}, testCatalog(new(int), nil), nil, "/auth")
+	_, wire, entry, _ := catalog.Resolve("", "glm-5.2")
+	if _, err := Set(target, "model", "glm-5.2"); err != nil {
+		t.Fatal(err)
+	}
+	if target.ProviderName != entry.Provider || target.ProviderExplicit || target.Conv.Model != wire || !reflect.DeepEqual(target.Conv.Pricing, entry.Pricing) {
+		t.Fatalf("resolved target = %#v", target)
+	}
+	before := Dump(target)
+	if _, err := Set(target, "model", "uncataloged"); !errors.Is(err, catalog.ErrUnknownModel) || !reflect.DeepEqual(Dump(target), before) {
+		t.Fatalf("unknown model error/state = %v/%v", err, Dump(target))
+	}
+}
+
+func TestExplicitProviderCatalogRoutingAndFreeFlow(t *testing.T) {
+	// R-523L-O1R4
+	target := NewTarget(&agentkit.Conversation{}, testCatalog(new(int), nil), nil, "/auth")
+	if _, err := Set(target, "provider", "openrouter"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Set(target, "model", "glm-5.2"); err != nil {
+		t.Fatal(err)
+	}
+	if target.Conv.Model != "z-ai/glm-5.2" || target.Conv.Pricing == nil {
+		t.Fatalf("routed model/pricing = %q/%v", target.Conv.Model, target.Conv.Pricing)
+	}
+	if got, _ := Get(target, "model"); got != "glm-5.2" {
+		t.Fatalf("display model = %q", got)
+	}
+	notice, err := Set(target, "model", "vendor-preview")
+	if err != nil || notice == "" || target.Conv.Model != "vendor-preview" || target.Conv.Pricing != nil {
+		t.Fatalf("free flow = %q/%v/%q/%v", notice, err, target.Conv.Model, target.Conv.Pricing)
+	}
+	if !strings.Contains(strings.Join(Dump(target), "\n"), "model=vendor-preview") {
+		t.Fatalf("Dump = %v", Dump(target))
+	}
+}
+
+func TestAuthValidationAndProviderDefaults(t *testing.T) {
+	// R-4TKA-ZNK9
+	var effective []catalog.AuthMethod
+	cat := testCatalog(new(int), func(p catalog.Provider, opts catalog.Options) (agentkit.Provider, error) {
+		method := opts.Auth
+		if method == "" {
+			method = p.Methods[0]
 		}
-		if target.Conv.Provider == nil || target.Conv.Provider.Name() != "test" {
-			t.Fatalf("provider = %v, want constructed test provider", target.Conv.Provider)
-		}
+		effective = append(effective, method)
+		return fakeProvider(p.Name), nil
 	})
-
-	t.Run("provider unknown", func(t *testing.T) {
-		target := newTarget()
-		err := Set(target, "provider", "absent")
-		if !errors.Is(err, catalog.ErrUnknownProvider) {
-			t.Fatalf("Set unknown provider error = %v, want ErrUnknownProvider", err)
-		}
-		if target.Conv.Provider != nil {
-			t.Fatalf("provider = %v, want nil", target.Conv.Provider)
-		}
-	})
-
-	t.Run("provider missing key", func(t *testing.T) {
-		target := newTarget()
-		target.Getenv = func(string) string { return "" }
-		err := Set(target, "provider", "test")
-		if !errors.Is(err, catalog.ErrMissingKey) {
-			t.Fatalf("Set provider without key error = %v, want ErrMissingKey", err)
-		}
-		if !strings.Contains(err.Error(), "TEST_API_KEY") {
-			t.Fatalf("missing key error = %q, want env key", err)
-		}
-		if target.Conv.Provider != nil {
-			t.Fatalf("provider = %v, want nil", target.Conv.Provider)
-		}
-	})
-
-	t.Run("model validates against current provider", func(t *testing.T) {
-		models := catalog.Models("anthropic")
-		if len(models) == 0 {
-			t.Fatal("anthropic has no catalog models")
-		}
-		target := newCatalogModelTarget("anthropic")
-		if err := Set(target, "provider", "anthropic"); err != nil {
-			t.Fatalf("Set provider returned error: %v", err)
-		}
-		if err := Set(target, "model", models[0].Model); err != nil {
-			t.Fatalf("Set valid model returned error: %v", err)
-		}
-		err := Set(target, "model", "model-z")
-		if !errors.Is(err, catalog.ErrUnknownModel) {
-			t.Fatalf("Set invalid model error = %v, want ErrUnknownModel", err)
-		}
-		if !strings.Contains(err.Error(), "choose from:") || !strings.Contains(err.Error(), models[0].Model) {
-			t.Fatalf("invalid model error = %q, want choices", err)
-		}
-		if target.Conv.Model != models[0].Model {
-			t.Fatalf("model = %q, want previous valid model", target.Conv.Model)
-		}
-	})
-}
-
-func TestDumpReturnsAllKeysSortedWithCurrentValues(t *testing.T) {
-	// R-M4NP-V2P9
-	target := newTarget()
-	for _, pair := range []struct {
-		key string
-		raw string
-	}{
-		{key: "model", raw: "model-b"},
-		{key: "provider", raw: "test"},
-		{key: "system", raw: "steady"},
-		{key: "temperature", raw: "0.2"},
-		{key: "thinking_budget", raw: "8000"},
-		{key: "base_delay", raw: "750ms"},
-		{key: "tool_loop_limit", raw: "9"},
-		{key: "base_url", raw: "https://api.z.ai/api/coding/paas/v4"},
-	} {
-		if err := Set(target, pair.key, pair.raw); err != nil {
-			t.Fatalf("Set(%q): %v", pair.key, err)
-		}
+	target := NewTarget(&agentkit.Conversation{}, cat, nil, "/auth")
+	if _, err := Set(target, "auth", "token"); !errors.Is(err, ErrBadValue) {
+		t.Fatalf("invalid auth = %v", err)
 	}
-
-	got := Dump(target)
-	want := []string{
-		"base_delay=750ms",
-		"base_url=https://api.z.ai/api/coding/paas/v4",
-		"effort=default",
-		"ignore_retry_after=default",
-		"max_attempts=default",
-		"max_delay=default",
-		"max_elapsed=default",
-		"max_tokens=default",
-		"model=model-b",
-		"provider=test",
-		"system=steady",
-		"temperature=0.2",
-		"thinking=default",
-		"thinking_budget=8000",
-		"thinking_level=default",
-		"tool_loop_limit=9",
-		"top_p=default",
+	if _, err := Set(target, "provider", "zai"); err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Dump() = %#v, want %#v", got, want)
+	if _, err := Set(target, "auth", "sub"); !errors.Is(err, ErrBadValue) || !strings.Contains(err.Error(), "zai") || !strings.Contains(err.Error(), "sub") || target.Auth != "" {
+		t.Fatalf("unsupported auth = %v state %q", err, target.Auth)
 	}
-	if !slices.IsSorted(got) {
-		t.Fatalf("Dump() is not sorted: %v", got)
+	if _, err := target.Provider(); err != nil {
+		t.Fatal(err)
+	}
+	target2 := NewTarget(&agentkit.Conversation{}, cat, nil, "/auth")
+	if _, err := target2.Provider(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(effective, []catalog.AuthMethod{catalog.AuthKey, catalog.AuthSub}) {
+		t.Fatalf("effective methods = %v", effective)
 	}
 }
 
-func TestReasoningCoercesNativeShapeModelBlind(t *testing.T) {
-	// R-FZCE-VXJL
-	cases := []struct {
-		name string
-		key  string
-		raw  string
-		want agentkit.ReasoningValue
-	}{
-		{name: "effort known level", key: "effort", raw: "high", want: agentkit.Level("high")},
-		{name: "effort provider native level", key: "effort", raw: "xhigh", want: agentkit.Level("xhigh")},
-		{name: "effort none stays a level", key: "effort", raw: "none", want: agentkit.Level("none")},
-		{name: "thinking level", key: "thinking_level", raw: "high", want: agentkit.Level("high")},
-		{name: "thinking level xhigh", key: "thinking_level", raw: "xhigh", want: agentkit.Level("xhigh")},
-		{name: "thinking level none", key: "thinking_level", raw: "none", want: agentkit.Level("none")},
-		{name: "negative budget", key: "thinking_budget", raw: "-1", want: agentkit.Budget(-1)},
-		{name: "zero budget", key: "thinking_budget", raw: "0", want: agentkit.Budget(0)},
-		{name: "positive budget", key: "thinking_budget", raw: "8000", want: agentkit.Budget(8000)},
-		{name: "thinking off", key: "thinking", raw: "off", want: agentkit.DisableReasoning()},
-		{name: "thinking on", key: "thinking", raw: "on", want: agentkit.ReasoningValue{}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			target := newTarget()
-			if err := Set(target, tc.key, tc.raw); err != nil {
-				t.Fatalf("Set(%q, %q) returned error: %v", tc.key, tc.raw, err)
-			}
-			if target.Conv.Gen.Reasoning != tc.want {
-				t.Fatalf("Reasoning = %v, want %v", target.Conv.Gen.Reasoning, tc.want)
-			}
-			if target.ReasoningRaw != tc.raw || target.ReasoningKey != tc.key {
-				t.Fatalf("reasoning display = %q/%q, want %q/%q", target.ReasoningRaw, target.ReasoningKey, tc.raw, tc.key)
-			}
-		})
-	}
-}
-
-func TestReasoningAcceptsNonNativeValuesButRejectsStructurallyUnusableInput(t *testing.T) {
-	// R-G0KB-9PAA
-	target := newTarget()
-	if err := Set(target, "effort", "made-up-level"); err != nil {
-		t.Fatalf("Set non-native effort returned error: %v", err)
-	}
-	if target.Conv.Gen.Reasoning != agentkit.Level("made-up-level") {
-		t.Fatalf("Reasoning = %v, want made-up level", target.Conv.Gen.Reasoning)
-	}
-	if target.ReasoningRaw != "made-up-level" || target.ReasoningKey != "effort" {
-		t.Fatalf("reasoning display = %q/%q, want made-up-level/effort", target.ReasoningRaw, target.ReasoningKey)
-	}
-
-	beforeConv := *target.Conv
-	beforeRaw := target.ReasoningRaw
-	beforeKey := target.ReasoningKey
-	for _, tc := range []struct {
-		key    string
-		raw    string
-		reason string
-	}{
-		{key: "effort", raw: "", reason: "empty"},
-		{key: "thinking_level", raw: "", reason: "empty"},
-		{key: "thinking_budget", raw: "", reason: "empty"},
-		{key: "thinking_budget", raw: "high", reason: "invalid syntax"},
-		{key: "thinking", raw: "", reason: "empty"},
-		{key: "thinking", raw: "maybe", reason: "want on or off"},
-	} {
-		t.Run(tc.key+"="+tc.raw, func(t *testing.T) {
-			err := Set(target, tc.key, tc.raw)
-			if !errors.Is(err, ErrBadValue) {
-				t.Fatalf("Set(%q, %q) error = %v, want ErrBadValue", tc.key, tc.raw, err)
-			}
-			if !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), tc.reason) {
-				t.Fatalf("reasoning error = %q, want key and reason", err)
-			}
-			if !reflect.DeepEqual(beforeConv, *target.Conv) || target.ReasoningRaw != beforeRaw || target.ReasoningKey != beforeKey {
-				t.Fatalf("target mutated: before=%#v/%q/%q after=%#v/%q/%q", beforeConv, beforeRaw, beforeKey, *target.Conv, target.ReasoningRaw, target.ReasoningKey)
-			}
-		})
-	}
-}
-
-func TestReasoningDisplayUsesRawAndDefaultClears(t *testing.T) {
-	// R-G304-18RO
-	target := newTarget()
-	for _, key := range []string{"effort", "thinking_budget", "thinking_level", "thinking"} {
-		if got, ok := Get(target, key); !ok || got != "default" {
-			t.Fatalf("unset Get(%q) = %q, %v; want default, true", key, got, ok)
+func TestLazyProviderUsesOptionsCachesAndInvalidates(t *testing.T) {
+	// R-4W03-R71N
+	// R-54JE-FL8I
+	builds := 0
+	var got catalog.Options
+	cat := testCatalog(&builds, func(p catalog.Provider, opts catalog.Options) (agentkit.Provider, error) {
+		got = opts
+		if opts.AuthFile == "bad" {
+			return nil, errors.New("bad auth file")
 		}
-	}
-	if err := Set(target, "effort", "xhigh"); err != nil {
-		t.Fatalf("Set effort returned error: %v", err)
-	}
-	if got, ok := Get(target, "effort"); !ok || got != "xhigh" {
-		t.Fatalf("Get(effort) = %q, %v; want xhigh, true", got, ok)
-	}
-	for _, key := range []string{"thinking_budget", "thinking_level", "thinking"} {
-		if got, ok := Get(target, key); !ok || got != "default" {
-			t.Fatalf("Get(%q) = %q, %v; want default, true", key, got, ok)
-		}
-	}
-	if !slices.Contains(Dump(target), "effort=xhigh") || slices.Contains(Dump(target), "thinking_budget=xhigh") {
-		t.Fatalf("Dump did not render reasoning only under effort: %v", Dump(target))
-	}
-
-	if err := Set(target, "thinking_budget", "8000"); err != nil {
-		t.Fatalf("Set thinking_budget returned error: %v", err)
-	}
-	if got, ok := Get(target, "thinking_budget"); !ok || got != "8000" {
-		t.Fatalf("Get(thinking_budget) = %q, %v; want 8000, true", got, ok)
-	}
-	if got, ok := Get(target, "effort"); !ok || got != "default" {
-		t.Fatalf("Get(effort) = %q, %v; want default after overwrite, true", got, ok)
-	}
-
-	if err := Set(target, "thinking", "default"); err != nil {
-		t.Fatalf("default thinking returned error: %v", err)
-	}
-	if target.Conv.Gen.Reasoning != (agentkit.ReasoningValue{}) {
-		t.Fatalf("Reasoning = %v, want zero value", target.Conv.Gen.Reasoning)
-	}
-	if target.ReasoningRaw != "" {
-		t.Fatalf("ReasoningRaw = %q, want empty", target.ReasoningRaw)
-	}
-	if target.ReasoningKey != "" {
-		t.Fatalf("ReasoningKey = %q, want empty", target.ReasoningKey)
-	}
-	for _, key := range []string{"effort", "thinking_budget", "thinking_level", "thinking"} {
-		if got, ok := Get(target, key); !ok || got != "default" {
-			t.Fatalf("defaulted Get(%q) = %q, %v; want default, true", key, got, ok)
-		}
-	}
-}
-
-func TestZAIBaseURLStoresAndRebuildsOrderIndependently(t *testing.T) {
-	// R-SCS3-DV9R
-	override := "https://api.z.ai/api/coding/paas/v4"
-
-	t.Run("base URL before provider", func(t *testing.T) {
-		target := newZAITarget()
-		if err := Set(target, "base_url", override); err != nil {
-			t.Fatalf("Set base_url returned error: %v", err)
-		}
-		if target.Conv.Provider != nil {
-			t.Fatalf("provider = %v, want nil before provider selection", target.Conv.Provider)
-		}
-		if err := Set(target, "provider", "zai"); err != nil {
-			t.Fatalf("Set provider returned error: %v", err)
-		}
-		if got := providerBaseURL(t, target.Conv.Provider); got != override {
-			t.Fatalf("provider baseURL = %q, want %q", got, override)
-		}
+		return &countedProvider{name: p.Name, n: builds}, nil
 	})
-
-	t.Run("provider before base URL", func(t *testing.T) {
-		target := newZAITarget()
-		if err := Set(target, "provider", "zai"); err != nil {
-			t.Fatalf("Set provider returned error: %v", err)
-		}
-		if got := providerBaseURL(t, target.Conv.Provider); got != "" {
-			t.Fatalf("initial provider baseURL = %q, want default", got)
-		}
-		if err := Set(target, "base_url", override); err != nil {
-			t.Fatalf("Set base_url returned error: %v", err)
-		}
-		if got := providerBaseURL(t, target.Conv.Provider); got != override {
-			t.Fatalf("provider baseURL = %q, want %q", got, override)
-		}
-	})
-
-	t.Run("default clears and rebuilds active zai", func(t *testing.T) {
-		target := newZAITarget()
-		if err := Set(target, "base_url", override); err != nil {
-			t.Fatalf("Set base_url returned error: %v", err)
-		}
-		if err := Set(target, "provider", "zai"); err != nil {
-			t.Fatalf("Set provider returned error: %v", err)
-		}
-		if err := Set(target, "base_url", "default"); err != nil {
-			t.Fatalf("Set base_url default returned error: %v", err)
-		}
-		if target.ZaiBaseURL != "" {
-			t.Fatalf("ZaiBaseURL = %q, want cleared", target.ZaiBaseURL)
-		}
-		if got := providerBaseURL(t, target.Conv.Provider); got != "" {
-			t.Fatalf("provider baseURL = %q, want default", got)
-		}
-	})
-
-	t.Run("non-zai active provider stores without rebuild", func(t *testing.T) {
-		target := newZAITarget()
-		if err := Set(target, "provider", "other"); err != nil {
-			t.Fatalf("Set provider returned error: %v", err)
-		}
-		if err := Set(target, "base_url", override); err != nil {
-			t.Fatalf("Set base_url returned error: %v", err)
-		}
-		if target.ZaiBaseURL != override {
-			t.Fatalf("ZaiBaseURL = %q, want %q", target.ZaiBaseURL, override)
-		}
-		if target.Conv.Provider.Name() != "other" {
-			t.Fatalf("provider = %q, want other", target.Conv.Provider.Name())
-		}
-		if err := Set(target, "provider", "zai"); err != nil {
-			t.Fatalf("Set provider zai returned error: %v", err)
-		}
-		if got := providerBaseURL(t, target.Conv.Provider); got != override {
-			t.Fatalf("zai provider baseURL = %q, want %q", got, override)
-		}
-	})
-}
-
-func TestParsePairAndDirectSetReachIdenticalState(t *testing.T) {
-	// R-M5VM-8UFY
-	fromFlag := newTarget()
-	key, value, err := ParsePair("system=a=b")
+	target := NewTarget(&agentkit.Conversation{}, cat, nil, "/auth.json")
+	if _, err := Set(target, "base_url", "https://example.test"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := target.Provider()
 	if err != nil {
-		t.Fatalf("ParsePair returned error: %v", err)
+		t.Fatal(err)
 	}
-	if key != "system" || value != "a=b" {
-		t.Fatalf("ParsePair = %q, %q; want system, a=b", key, value)
+	second, err := target.Provider()
+	if err != nil || first != second || builds != 1 {
+		t.Fatalf("cache = %v/%v builds=%d", first, second, builds)
 	}
-	if err := Set(fromFlag, key, value); err != nil {
-		t.Fatalf("Set from ParsePair returned error: %v", err)
+	if got.BaseURL != "https://example.test" || got.Auth != "" || got.AuthFile != "/auth.json" || target.Conv.Provider != first {
+		t.Fatalf("options/assignment = %#v/%v", got, target.Conv.Provider)
 	}
-
-	direct := newTarget()
-	if err := Set(direct, "system", "a=b"); err != nil {
-		t.Fatalf("direct Set returned error: %v", err)
+	for _, pair := range [][2]string{{"provider", "openai"}, {"auth", "key"}, {"auth_file", "/next"}, {"base_url", "https://next.test"}} {
+		if _, err := Set(target, pair[0], pair[1]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := target.Provider(); err != nil {
+			t.Fatal(err)
+		}
 	}
-
-	if !reflect.DeepEqual(Dump(fromFlag), Dump(direct)) {
-		t.Fatalf("ParsePair+Set dump = %v, direct Set dump = %v", Dump(fromFlag), Dump(direct))
+	if builds != 5 {
+		t.Fatalf("builds after four invalidations = %d", builds)
 	}
-	if _, _, err := ParsePair("missing-separator"); !errors.Is(err, ErrBadValue) {
-		t.Fatalf("ParsePair missing separator error = %v, want ErrBadValue", err)
+	if _, err := Set(target, "auth_file", "bad"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.Provider(); err == nil || !strings.Contains(err.Error(), "bad auth file") {
+		t.Fatalf("construction error = %v", err)
 	}
 }
 
-func newTarget() *Target {
-	return &Target{
-		Conv: &agentkit.Conversation{},
-		Catalog: []catalog.Provider{
-			{
-				Name:    "test",
-				EnvKey:  "TEST_API_KEY",
-				Methods: []catalog.AuthMethod{catalog.AuthKey},
-				New: func(getenv func(string) string, opts catalog.Options) (agentkit.Provider, error) {
-					if getenv("TEST_API_KEY") == "" {
-						return nil, fmt.Errorf("%w: TEST_API_KEY", catalog.ErrMissingKey)
-					}
-					return fakeProvider{name: "test", baseURL: opts.BaseURL}, nil
-				},
-			},
-		},
-		Getenv: func(key string) string {
-			if key == "TEST_API_KEY" {
-				return "test-key"
+func TestReasoningCatalogGateAndFreeFlowPassThrough(t *testing.T) {
+	// R-53BI-1THT
+	target := NewTarget(&agentkit.Conversation{}, testCatalog(new(int), nil), nil, "/auth")
+	entry, _ := akcatalog.Lookup(defaultModel)
+	if entry.Reasoning == nil || len(entry.Reasoning.Levels) == 0 {
+		t.Fatal("default model lacks enum reasoning spec")
+	}
+	accepted := entry.Reasoning.Levels[0]
+	if _, err := Set(target, "effort", accepted); err != nil {
+		t.Fatal(err)
+	}
+	before := target.Conv.Gen.Reasoning
+	if _, err := Set(target, "effort", "not-native"); !errors.Is(err, ErrBadValue) || !strings.Contains(err.Error(), "accepted values") || target.Conv.Gen.Reasoning != before {
+		t.Fatalf("catalog rejection = %v reasoning=%v", err, target.Conv.Gen.Reasoning)
+	}
+	if _, err := Set(target, "provider", "openrouter"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Set(target, "model", "free-preview"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Set(target, "effort", "not-native"); err != nil || target.Conv.Gen.Reasoning != agentkit.Level("not-native") {
+		t.Fatalf("free-flow reasoning = %v/%v", err, target.Conv.Gen.Reasoning)
+	}
+}
+
+func TestParsePairAndKeys(t *testing.T) {
+	key, value, err := ParsePair("system=a=b")
+	if err != nil || key != "system" || value != "a=b" {
+		t.Fatalf("ParsePair = %q/%q/%v", key, value, err)
+	}
+	if _, _, err := ParsePair("missing"); !errors.Is(err, ErrBadValue) {
+		t.Fatalf("bad pair = %v", err)
+	}
+	if !reflect.DeepEqual(Keys(), keys) {
+		t.Fatalf("Keys = %v", Keys())
+	}
+}
+
+func testCatalog(builds *int, hook func(catalog.Provider, catalog.Options) (agentkit.Provider, error)) []catalog.Provider {
+	methods := map[string][]catalog.AuthMethod{"openai": {catalog.AuthSub, catalog.AuthKey}, "anthropic": {catalog.AuthKey}, "google": {catalog.AuthKey}, "openrouter": {catalog.AuthKey}, "zai": {catalog.AuthKey}}
+	out := make([]catalog.Provider, 0, len(methods))
+	for _, name := range []string{"anthropic", "google", "openai", "openrouter", "zai"} {
+		p := catalog.Provider{Name: name, EnvKey: strings.ToUpper(name) + "_API_KEY", Methods: methods[name]}
+		p.New = func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
+			*builds++
+			if hook != nil {
+				return hook(p, opts)
 			}
-			return ""
-		},
+			return fakeProvider(p.Name), nil
+		}
+		out = append(out, p)
 	}
+	return out
 }
 
-func newCatalogModelTarget(name string) *Target {
-	return &Target{
-		Conv: &agentkit.Conversation{},
-		Catalog: []catalog.Provider{{
-			Name: name, EnvKey: "TEST_API_KEY", Methods: []catalog.AuthMethod{catalog.AuthKey},
-			New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
-				return fakeProvider{name: name}, nil
-			},
-		}},
-		Getenv: func(string) string { return "test-key" },
-	}
+type fakeProvider string
+
+func (p fakeProvider) Name() string                                                     { return string(p) }
+func (p fakeProvider) RoundTrip(context.Context, *agentkit.Request) *agentkit.RoundTrip { return nil }
+func (p fakeProvider) Pricing(string) (agentkit.Pricing, bool)                          { return agentkit.Pricing{}, false }
+
+type countedProvider struct {
+	name string
+	n    int
 }
 
-type fakeProvider struct {
-	name    string
-	baseURL string
-}
-
-func (p fakeProvider) RoundTrip(context.Context, *agentkit.Request) *agentkit.RoundTrip {
+func (p *countedProvider) Name() string { return fmt.Sprintf("%s-%d", p.name, p.n) }
+func (p *countedProvider) RoundTrip(context.Context, *agentkit.Request) *agentkit.RoundTrip {
 	return nil
 }
-
-func newZAITarget() *Target {
-	return &Target{
-		Conv: &agentkit.Conversation{},
-		Catalog: []catalog.Provider{
-			{
-				Name:    "zai",
-				EnvKey:  "ZAI_API_KEY",
-				Methods: []catalog.AuthMethod{catalog.AuthKey},
-				New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
-					return fakeProvider{name: "zai", baseURL: opts.BaseURL}, nil
-				},
-			},
-			{
-				Name:    "other",
-				EnvKey:  "OTHER_API_KEY",
-				Methods: []catalog.AuthMethod{catalog.AuthKey},
-				New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
-					return fakeProvider{name: "other", baseURL: opts.BaseURL}, nil
-				},
-			},
-		},
-		Getenv: func(key string) string {
-			switch key {
-			case "ZAI_API_KEY", "OTHER_API_KEY":
-				return "test-key"
-			default:
-				return ""
-			}
-		},
-	}
-}
-
-func providerBaseURL(t *testing.T, provider agentkit.Provider) string {
-	t.Helper()
-	fake, ok := provider.(fakeProvider)
-	if !ok {
-		t.Fatalf("provider type = %T, want fakeProvider", provider)
-	}
-	return fake.baseURL
-}
-
-func (p fakeProvider) Name() string {
-	return p.name
-}
-
-func (p fakeProvider) Pricing(model string) (agentkit.Pricing, bool) {
-	switch model {
-	case "model-a", "model-b":
-		return agentkit.Pricing{}, true
-	default:
-		return agentkit.Pricing{}, false
-	}
-}
+func (p *countedProvider) Pricing(string) (agentkit.Pricing, bool) { return agentkit.Pricing{}, false }

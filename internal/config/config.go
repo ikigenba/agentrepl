@@ -13,13 +13,28 @@ import (
 	"github.com/ikigenba/agentrepl/internal/catalog"
 )
 
+const (
+	defaultValue    = "default"
+	defaultProvider = "openai"
+	defaultModel    = "gpt-5.6-sol"
+)
+
 type Target struct {
-	Conv         *agentkit.Conversation
-	Catalog      []catalog.Provider
-	Getenv       func(string) string
-	ZaiBaseURL   string
-	ReasoningRaw string
-	ReasoningKey string
+	Conv   *agentkit.Conversation
+	Cat    []catalog.Provider
+	Getenv func(string) string
+
+	ProviderName     string
+	ProviderExplicit bool
+	ModelName        string
+	Auth             string
+	AuthFile         string
+	BaseURL          string
+	ReasoningRaw     string
+	ReasoningKey     string
+
+	authFileDefault string
+	built           agentkit.Provider
 }
 
 var (
@@ -27,390 +42,369 @@ var (
 	ErrBadValue   = errors.New("invalid value for config key")
 )
 
-type field struct {
-	set   func(*Target, string) error
-	get   func(*Target) string
-	reset func(*Target) error
+var keys = []string{
+	"auth", "auth_file", "base_delay", "base_url", "effort", "ignore_retry_after",
+	"max_attempts", "max_delay", "max_elapsed", "max_tokens", "model", "provider",
+	"system", "temperature", "thinking", "thinking_budget", "thinking_level",
+	"tool_loop_limit", "top_p",
 }
 
-const defaultValue = "default"
-
-var fields = map[string]field{
-	"provider": {
-		set: func(t *Target, raw string) error {
-			p, ok := catalog.Lookup(t.Catalog, raw)
-			if !ok {
-				return fmt.Errorf("%w: %q", catalog.ErrUnknownProvider, raw)
-			}
-			provider, err := p.New(getenv(t), optionsFor(t, p))
-			if err != nil {
-				return fmt.Errorf("provider %q: %w", raw, err)
-			}
-			t.Conv.Provider = provider
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.Conv == nil || t.Conv.Provider == nil {
-				return defaultValue
-			}
-			return t.Conv.Provider.Name()
-		},
-		reset: func(t *Target) error {
-			t.Conv.Provider = nil
-			return nil
-		},
-	},
-	"model": {
-		set: func(t *Target, raw string) error {
-			if t.Conv.Provider != nil {
-				name := t.Conv.Provider.Name()
-				p, ok := catalog.Lookup(t.Catalog, name)
-				if !ok {
-					return fmt.Errorf("%w: %q", catalog.ErrUnknownProvider, name)
-				}
-				models := catalog.Models(p.Name)
-				if len(models) > 0 && !hasModel(models, raw) {
-					return fmt.Errorf("%w: %q; choose from: %s", catalog.ErrUnknownModel, raw, strings.Join(modelNames(models), ", "))
-				}
-			}
-			t.Conv.Model = raw
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.Conv == nil || t.Conv.Model == "" {
-				return defaultValue
-			}
-			return t.Conv.Model
-		},
-		reset: func(t *Target) error {
-			t.Conv.Model = ""
-			return nil
-		},
-	},
-	"system": {
-		set: func(t *Target, raw string) error {
-			t.Conv.System = raw
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.Conv == nil || t.Conv.System == "" {
-				return defaultValue
-			}
-			return t.Conv.System
-		},
-		reset: func(t *Target) error {
-			t.Conv.System = ""
-			return nil
-		},
-	},
-	"temperature": floatField(
-		func(c *agentkit.Conversation) **float64 { return &c.Gen.Temperature },
-	),
-	"top_p": floatField(
-		func(c *agentkit.Conversation) **float64 { return &c.Gen.TopP },
-	),
-	"max_tokens": intField(
-		func(c *agentkit.Conversation) *int { return &c.Gen.MaxTokens },
-	),
-	"effort":          reasoningLevelField("effort"),
-	"thinking_budget": reasoningBudgetField("thinking_budget"),
-	"thinking_level":  reasoningLevelField("thinking_level"),
-	"thinking":        reasoningToggleField("thinking"),
-	"max_attempts": intField(
-		func(c *agentkit.Conversation) *int { return &c.Retry.MaxAttempts },
-	),
-	"base_delay": durationField(
-		func(c *agentkit.Conversation) *time.Duration { return &c.Retry.BaseDelay },
-	),
-	"max_delay": durationField(
-		func(c *agentkit.Conversation) *time.Duration { return &c.Retry.MaxDelay },
-	),
-	"max_elapsed": durationField(
-		func(c *agentkit.Conversation) *time.Duration { return &c.Retry.MaxElapsed },
-	),
-	"ignore_retry_after": boolField(
-		func(c *agentkit.Conversation) *bool { return &c.Retry.IgnoreRetryAfter },
-	),
-	"tool_loop_limit": intField(
-		func(c *agentkit.Conversation) *int { return &c.MaxToolIterations },
-	),
-	"base_url": {
-		set: func(t *Target, raw string) error {
-			return setZaiBaseURL(t, raw)
-		},
-		get: func(t *Target) string {
-			if t == nil || t.ZaiBaseURL == "" {
-				return defaultValue
-			}
-			return t.ZaiBaseURL
-		},
-		reset: func(t *Target) error {
-			return setZaiBaseURL(t, "")
-		},
-	},
+func NewTarget(conv *agentkit.Conversation, cat []catalog.Provider, getenv func(string) string, authFileDefault string) *Target {
+	t := &Target{Conv: conv, Cat: cat, Getenv: getenv, ProviderName: defaultProvider, AuthFile: authFileDefault, authFileDefault: authFileDefault}
+	_, wire, entry, ok := catalog.Resolve("", defaultModel)
+	if ok {
+		t.ModelName = defaultModel
+		t.ProviderName = entry.Provider
+		conv.Model = wire
+		conv.Pricing = entry.Pricing
+	}
+	return t
 }
 
-func Set(t *Target, key, raw string) error {
-	f, ok := fields[key]
+func (t *Target) Provider() (agentkit.Provider, error) {
+	if t == nil || t.Conv == nil {
+		return nil, fmt.Errorf("%w: provider: missing target conversation", ErrBadValue)
+	}
+	if t.built != nil {
+		return t.built, nil
+	}
+	p, ok := catalog.Lookup(t.Cat, t.ProviderName)
 	if !ok {
-		return fmt.Errorf("%w: %s", ErrUnknownKey, key)
+		return nil, unknownProvider(t, t.ProviderName)
+	}
+	built, err := p.New(t.getenv(), catalog.Options{BaseURL: t.BaseURL, Auth: catalog.AuthMethod(t.Auth), AuthFile: t.AuthFile})
+	if err != nil {
+		return nil, fmt.Errorf("provider %q: %w", t.ProviderName, err)
+	}
+	t.built = built
+	t.Conv.Provider = built
+	return built, nil
+}
+
+func Set(t *Target, key, raw string) (notice string, err error) {
+	if !slices.Contains(keys, key) {
+		return "", fmt.Errorf("%w: %s", ErrUnknownKey, key)
 	}
 	if t == nil || t.Conv == nil {
-		return fmt.Errorf("%w: %s: missing target conversation", ErrBadValue, key)
+		return "", fmt.Errorf("%w: %s: missing target conversation", ErrBadValue, key)
+	}
+	if raw == "" {
+		return "", badValue(key, "empty value")
 	}
 	if raw == defaultValue {
-		return f.reset(t)
+		return "", reset(t, key)
 	}
-	if err := f.set(t, raw); err != nil {
-		if errors.Is(err, ErrBadValue) {
-			return fmt.Errorf("%s: %w", key, err)
+
+	switch key {
+	case "provider":
+		if _, ok := catalog.Lookup(t.Cat, raw); !ok {
+			return "", unknownProvider(t, raw)
 		}
+		t.ProviderName, t.ProviderExplicit = raw, true
+		t.invalidate()
+	case "model":
+		return setModel(t, raw)
+	case "auth":
+		method := catalog.AuthMethod(raw)
+		if method != catalog.AuthKey && method != catalog.AuthSub {
+			return "", badValue(key, "want key or sub")
+		}
+		p, ok := catalog.Lookup(t.Cat, t.ProviderName)
+		if !ok {
+			return "", unknownProvider(t, t.ProviderName)
+		}
+		if !slices.Contains(p.Methods, method) {
+			return "", badValue(key, fmt.Sprintf("provider %s does not support method %s", p.Name, method))
+		}
+		t.Auth = raw
+		t.invalidate()
+	case "auth_file":
+		t.AuthFile = raw
+		t.invalidate()
+	case "base_url":
+		t.BaseURL = raw
+		t.invalidate()
+	case "system":
+		t.Conv.System = raw
+	case "temperature":
+		v, e := strconv.ParseFloat(raw, 64)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.Gen.Temperature = &v
+	case "top_p":
+		v, e := strconv.ParseFloat(raw, 64)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.Gen.TopP = &v
+	case "max_tokens":
+		v, e := strconv.Atoi(raw)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.Gen.MaxTokens = v
+	case "max_attempts":
+		v, e := strconv.Atoi(raw)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.Retry.MaxAttempts = v
+	case "base_delay":
+		v, e := time.ParseDuration(raw)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.Retry.BaseDelay = v
+	case "max_delay":
+		v, e := time.ParseDuration(raw)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.Retry.MaxDelay = v
+	case "max_elapsed":
+		v, e := time.ParseDuration(raw)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.Retry.MaxElapsed = v
+	case "ignore_retry_after":
+		v, e := strconv.ParseBool(raw)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.Retry.IgnoreRetryAfter = v
+	case "tool_loop_limit":
+		v, e := strconv.Atoi(raw)
+		if e != nil {
+			return "", badValue(key, e.Error())
+		}
+		t.Conv.MaxToolIterations = v
+	case "effort", "thinking_level", "thinking_budget", "thinking":
+		return "", setReasoning(t, key, raw)
+	}
+	return "", nil
+}
+
+func setModel(t *Target, raw string) (string, error) {
+	provider := ""
+	if t.ProviderExplicit {
+		provider = t.ProviderName
+	}
+	route, wire, entry, ok := catalog.Resolve(provider, raw)
+	if !ok && !t.ProviderExplicit {
+		return "", fmt.Errorf("%w: %q not in the agentkit catalog; set provider explicitly to send it anyway", catalog.ErrUnknownModel, raw)
+	}
+	if ok {
+		t.ModelName, t.Conv.Model, t.Conv.Pricing = raw, wire, entry.Pricing
+		if !t.ProviderExplicit {
+			t.ProviderName = route
+			t.invalidate()
+		}
+		return "", nil
+	}
+	t.ModelName, t.Conv.Model, t.Conv.Pricing = raw, raw, nil
+	return "model not in catalog: no pricing (cost reports 0), reasoning unchecked", nil
+}
+
+func setReasoning(t *Target, key, raw string) error {
+	value := agentkit.ReasoningValue{}
+	var err error
+	switch key {
+	case "effort", "thinking_level":
+		value = agentkit.Level(raw)
+	case "thinking_budget":
+		var n int
+		n, err = strconv.Atoi(raw)
+		if err == nil {
+			value = agentkit.Budget(n)
+		}
+	case "thinking":
+		switch raw {
+		case "on":
+		case "off":
+			value = agentkit.DisableReasoning()
+		default:
+			err = errors.New("want on or off")
+		}
+	}
+	if err != nil {
+		return badValue(key, err.Error())
+	}
+	if entry, ok := akcatalog.Lookup(t.ModelName); ok && entry.Reasoning != nil {
+		accepted, spec, _ := akcatalog.Check(t.ModelName, value)
+		if !accepted {
+			return badValue(key, fmt.Sprintf("not accepted for %s; accepted values: %s", t.ModelName, acceptedValues(spec)))
+		}
+	}
+	t.Conv.Gen.Reasoning, t.ReasoningRaw, t.ReasoningKey = value, raw, key
+	return nil
+}
+
+func acceptedValues(spec *akcatalog.ReasoningSpec) string {
+	if spec == nil {
+		return "none"
+	}
+	parts := append([]string(nil), spec.Levels...)
+	if spec.Kind == akcatalog.ReasoningRange {
+		parts = append(parts, fmt.Sprintf("%d..%d", spec.Min, spec.Max))
+	}
+	for _, sentinel := range spec.Sentinels {
+		parts = append(parts, strconv.Itoa(sentinel.Value))
+	}
+	if spec.CanDisable {
+		parts = append(parts, "off")
+	}
+	return strings.Join(parts, ", ")
+}
+
+func reset(t *Target, key string) error {
+	switch key {
+	case "provider":
+		t.ProviderName, t.ProviderExplicit = defaultProvider, false
+		t.invalidate()
+	case "model":
+		_, err := setModel(t, defaultModel)
 		return err
+	case "auth":
+		t.Auth = ""
+		t.invalidate()
+	case "auth_file":
+		t.AuthFile = t.authFileDefault
+		t.invalidate()
+	case "base_url":
+		t.BaseURL = ""
+		t.invalidate()
+	case "system":
+		t.Conv.System = ""
+	case "temperature":
+		t.Conv.Gen.Temperature = nil
+	case "top_p":
+		t.Conv.Gen.TopP = nil
+	case "max_tokens":
+		t.Conv.Gen.MaxTokens = 0
+	case "max_attempts":
+		t.Conv.Retry.MaxAttempts = 0
+	case "base_delay":
+		t.Conv.Retry.BaseDelay = 0
+	case "max_delay":
+		t.Conv.Retry.MaxDelay = 0
+	case "max_elapsed":
+		t.Conv.Retry.MaxElapsed = 0
+	case "ignore_retry_after":
+		t.Conv.Retry.IgnoreRetryAfter = false
+	case "tool_loop_limit":
+		t.Conv.MaxToolIterations = 0
+	case "effort", "thinking_level", "thinking_budget", "thinking":
+		t.Conv.Gen.Reasoning = agentkit.ReasoningValue{}
+		t.ReasoningRaw, t.ReasoningKey = "", ""
 	}
 	return nil
 }
 
 func Get(t *Target, key string) (string, bool) {
-	f, ok := fields[key]
-	if !ok {
+	if !slices.Contains(keys, key) {
 		return "", false
 	}
-	return f.get(t), true
+	if t == nil || t.Conv == nil {
+		return defaultValue, true
+	}
+	switch key {
+	case "provider":
+		return t.ProviderName, true
+	case "model":
+		return t.ModelName, true
+	case "auth":
+		if t.Auth != "" {
+			return t.Auth, true
+		}
+	case "auth_file":
+		if t.AuthFile != "" {
+			return t.AuthFile, true
+		}
+	case "base_url":
+		if t.BaseURL != "" {
+			return t.BaseURL, true
+		}
+	case "system":
+		if t.Conv.System != "" {
+			return t.Conv.System, true
+		}
+	case "temperature":
+		if t.Conv.Gen.Temperature != nil {
+			return strconv.FormatFloat(*t.Conv.Gen.Temperature, 'g', -1, 64), true
+		}
+	case "top_p":
+		if t.Conv.Gen.TopP != nil {
+			return strconv.FormatFloat(*t.Conv.Gen.TopP, 'g', -1, 64), true
+		}
+	case "max_tokens":
+		if t.Conv.Gen.MaxTokens != 0 {
+			return strconv.Itoa(t.Conv.Gen.MaxTokens), true
+		}
+	case "max_attempts":
+		if t.Conv.Retry.MaxAttempts != 0 {
+			return strconv.Itoa(t.Conv.Retry.MaxAttempts), true
+		}
+	case "base_delay":
+		if t.Conv.Retry.BaseDelay != 0 {
+			return t.Conv.Retry.BaseDelay.String(), true
+		}
+	case "max_delay":
+		if t.Conv.Retry.MaxDelay != 0 {
+			return t.Conv.Retry.MaxDelay.String(), true
+		}
+	case "max_elapsed":
+		if t.Conv.Retry.MaxElapsed != 0 {
+			return t.Conv.Retry.MaxElapsed.String(), true
+		}
+	case "ignore_retry_after":
+		if t.Conv.Retry.IgnoreRetryAfter {
+			return "true", true
+		}
+	case "tool_loop_limit":
+		if t.Conv.MaxToolIterations != 0 {
+			return strconv.Itoa(t.Conv.MaxToolIterations), true
+		}
+	case "effort", "thinking_level", "thinking_budget", "thinking":
+		if t.ReasoningKey == key && t.ReasoningRaw != "" {
+			return t.ReasoningRaw, true
+		}
+	}
+	return defaultValue, true
 }
 
 func Dump(t *Target) []string {
-	keys := Keys()
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
-		value, _ := Get(t, key)
-		out = append(out, key+"="+value)
+		v, _ := Get(t, key)
+		out = append(out, key+"="+v)
 	}
 	return out
 }
-
-func Keys() []string {
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	return keys
-}
+func Keys() []string { return append([]string(nil), keys...) }
 
 func ParsePair(s string) (key, value string, err error) {
 	key, value, ok := strings.Cut(s, "=")
-	if !ok || key == "" {
-		return "", "", fmt.Errorf("%w: expected key=value", ErrBadValue)
+	if !ok || key == "" || value == "" {
+		return "", "", badValue("config", "expected key=value")
 	}
 	return key, value, nil
 }
 
-func floatField(ptr func(*agentkit.Conversation) **float64) field {
-	return field{
-		set: func(t *Target, raw string) error {
-			value, err := strconv.ParseFloat(raw, 64)
-			if err != nil {
-				return fmt.Errorf("%w: %s: %v", ErrBadValue, raw, err)
-			}
-			*ptr(t.Conv) = &value
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.Conv == nil || *ptr(t.Conv) == nil {
-				return defaultValue
-			}
-			return strconv.FormatFloat(**ptr(t.Conv), 'g', -1, 64)
-		},
-		reset: func(t *Target) error {
-			*ptr(t.Conv) = nil
-			return nil
-		},
-	}
-}
-
-func intField(ptr func(*agentkit.Conversation) *int) field {
-	return field{
-		set: func(t *Target, raw string) error {
-			value, err := strconv.Atoi(raw)
-			if err != nil {
-				return fmt.Errorf("%w: %s: %v", ErrBadValue, raw, err)
-			}
-			*ptr(t.Conv) = value
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.Conv == nil || *ptr(t.Conv) == 0 {
-				return defaultValue
-			}
-			return strconv.Itoa(*ptr(t.Conv))
-		},
-		reset: func(t *Target) error {
-			*ptr(t.Conv) = 0
-			return nil
-		},
-	}
-}
-
-func durationField(ptr func(*agentkit.Conversation) *time.Duration) field {
-	return field{
-		set: func(t *Target, raw string) error {
-			value, err := time.ParseDuration(raw)
-			if err != nil {
-				return fmt.Errorf("%w: %s: %v", ErrBadValue, raw, err)
-			}
-			*ptr(t.Conv) = value
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.Conv == nil || *ptr(t.Conv) == 0 {
-				return defaultValue
-			}
-			return ptr(t.Conv).String()
-		},
-		reset: func(t *Target) error {
-			*ptr(t.Conv) = 0
-			return nil
-		},
-	}
-}
-
-func boolField(ptr func(*agentkit.Conversation) *bool) field {
-	return field{
-		set: func(t *Target, raw string) error {
-			value, err := strconv.ParseBool(raw)
-			if err != nil {
-				return fmt.Errorf("%w: %s: %v", ErrBadValue, raw, err)
-			}
-			*ptr(t.Conv) = value
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.Conv == nil || !*ptr(t.Conv) {
-				return defaultValue
-			}
-			return strconv.FormatBool(*ptr(t.Conv))
-		},
-		reset: func(t *Target) error {
-			*ptr(t.Conv) = false
-			return nil
-		},
-	}
-}
-
-func reasoningLevelField(key string) field {
-	return reasoningField(key, func(display string) (agentkit.ReasoningValue, error) {
-		return agentkit.Level(display), nil
-	})
-}
-
-func reasoningBudgetField(key string) field {
-	return reasoningField(key, func(display string) (agentkit.ReasoningValue, error) {
-		budget, err := strconv.Atoi(display)
-		if err != nil {
-			return agentkit.ReasoningValue{}, fmt.Errorf("%w: %s: %v", ErrBadValue, display, err)
-		}
-		return agentkit.Budget(budget), nil
-	})
-}
-
-func reasoningToggleField(key string) field {
-	return reasoningField(key, func(display string) (agentkit.ReasoningValue, error) {
-		switch strings.ToLower(display) {
-		case "off":
-			return agentkit.DisableReasoning(), nil
-		case "on":
-			return agentkit.ReasoningValue{}, nil
-		default:
-			return agentkit.ReasoningValue{}, fmt.Errorf("%w: %s: want on or off", ErrBadValue, display)
-		}
-	})
-}
-
-func reasoningField(key string, parse func(string) (agentkit.ReasoningValue, error)) field {
-	return field{
-		set: func(t *Target, raw string) error {
-			value, display, err := parseReasoningValue(key, raw, parse)
-			if err != nil {
-				return err
-			}
-			t.Conv.Gen.Reasoning = value
-			t.ReasoningRaw = display
-			t.ReasoningKey = key
-			return nil
-		},
-		get: func(t *Target) string {
-			if t == nil || t.ReasoningRaw == "" || t.ReasoningKey != key {
-				return defaultValue
-			}
-			return t.ReasoningRaw
-		},
-		reset: resetReasoning,
-	}
-}
-
-func parseReasoningValue(key, raw string, parse func(string) (agentkit.ReasoningValue, error)) (agentkit.ReasoningValue, string, error) {
-	display := strings.TrimSpace(raw)
-	if display == "" {
-		return agentkit.ReasoningValue{}, "", fmt.Errorf("%w: %s: empty value", ErrBadValue, key)
-	}
-	value, err := parse(display)
-	if err != nil {
-		return agentkit.ReasoningValue{}, "", err
-	}
-	return value, display, nil
-}
-
-func resetReasoning(t *Target) error {
-	t.Conv.Gen.Reasoning = agentkit.ReasoningValue{}
-	t.ReasoningRaw = ""
-	t.ReasoningKey = ""
-	return nil
-}
-
-func getenv(t *Target) func(string) string {
+func (t *Target) invalidate() { t.built = nil; t.Conv.Provider = nil }
+func (t *Target) getenv() func(string) string {
 	if t.Getenv != nil {
 		return t.Getenv
 	}
 	return func(string) string { return "" }
 }
-
-func optionsFor(t *Target, p catalog.Provider) catalog.Options {
-	opts := catalog.Options{Auth: catalog.AuthKey}
-	if p.Name == "zai" {
-		opts.BaseURL = t.ZaiBaseURL
+func badValue(key, reason string) error { return fmt.Errorf("%w: %s: %s", ErrBadValue, key, reason) }
+func unknownProvider(t *Target, name string) error {
+	names := make([]string, len(t.Cat))
+	for i, p := range t.Cat {
+		names[i] = p.Name
 	}
-	return opts
-}
-
-func setZaiBaseURL(t *Target, raw string) error {
-	if t.Conv.Provider != nil && t.Conv.Provider.Name() == "zai" {
-		p, ok := catalog.Lookup(t.Catalog, "zai")
-		if !ok {
-			return fmt.Errorf("%w: %q", catalog.ErrUnknownProvider, "zai")
-		}
-		provider, err := p.New(getenv(t), catalog.Options{BaseURL: raw, Auth: catalog.AuthKey})
-		if err != nil {
-			return fmt.Errorf("provider %q: %w", "zai", err)
-		}
-		t.Conv.Provider = provider
-	}
-	t.ZaiBaseURL = raw
-	return nil
-}
-
-func hasModel(entries []akcatalog.Entry, model string) bool {
-	for _, entry := range entries {
-		if entry.Model == model {
-			return true
-		}
-	}
-	return false
-}
-
-func modelNames(entries []akcatalog.Entry) []string {
-	names := make([]string, len(entries))
-	for i, entry := range entries {
-		names[i] = entry.Model
-	}
-	return names
+	slices.Sort(names)
+	return fmt.Errorf("%w: %q; choose from: %s", catalog.ErrUnknownProvider, name, strings.Join(names, ", "))
 }

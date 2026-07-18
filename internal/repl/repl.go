@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/ikigenba/agentkit"
@@ -31,15 +32,13 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 	}
 
 	cat := defaultCatalog()
+	color := d.IO.IsTTY && d.Getenv("NO_COLOR") == ""
+	rend := newRenderer(d.IO.Out, color, d.IO.IsTTY, opts.Raw)
 	conv := &agentkit.Conversation{
 		Log:   log,
 		Tools: tools.All(),
 	}
-	target := &config.Target{
-		Conv:    conv,
-		Catalog: cat,
-		Getenv:  d.Getenv,
-	}
+	target := config.NewTarget(conv, cat, d.Getenv, filepath.Join(d.LogDir, "auth.json"))
 	for _, raw := range opts.Config {
 		key, value, err := config.ParsePair(raw)
 		if err != nil {
@@ -47,20 +46,23 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 			_ = log.Close()
 			return 1
 		}
-		if err := config.Set(target, key, value); err != nil {
+		notice, err := config.Set(target, key, value)
+		if err != nil {
 			fmt.Fprintf(d.IO.Err, "startup: config %q: %v\n", raw, err)
 			_ = log.Close()
 			return 1
 		}
+		if notice != "" {
+			rend.Notice(notice)
+		}
 	}
 
-	color := d.IO.IsTTY && d.Getenv("NO_COLOR") == ""
 	state := &state{
 		conv:       conv,
 		target:     target,
 		cat:        cat,
 		io:         d.IO,
-		rend:       newRenderer(d.IO.Out, color, d.IO.IsTTY, opts.Raw),
+		rend:       rend,
 		color:      color,
 		getenv:     d.Getenv,
 		liveWaiter: d.Waiter,
@@ -93,9 +95,11 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 			}
 			if strings.HasPrefix(line, "/") {
 				runCommand(state, line)
-			} else if state.conv.Provider == nil || state.conv.Model == "" {
-				state.rend.Notice("set a provider and model first - e.g. `/set provider anthropic` then `/set model ...`")
 			} else {
+				if _, err := state.target.Provider(); err != nil {
+					state.rend.Error(err)
+					continue
+				}
 				handleTurn(ctx, state, line)
 			}
 			if state.quit {
