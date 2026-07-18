@@ -88,3 +88,35 @@ func TestOpenCreatesMissingDirAndOpensUnbufferedWritableTruncatedFile(t *testing
 		t.Fatalf("write was not visible through path before Close(), content = %q", got)
 	}
 }
+
+func TestDefaultDirAndOpenCreateAgentREPLLogPath(t *testing.T) {
+	// R-GUN2-2ULO
+	home := t.TempDir()
+	dir := DefaultDir(home)
+	wantDir := filepath.Join(home, ".agentrepl", "logs")
+	if dir != wantDir {
+		t.Fatalf("DefaultDir() = %q, want %q", dir, wantDir)
+	}
+
+	now := time.Date(2026, 7, 18, 9, 10, 11, 123456000, time.UTC)
+	file, _, err := Open(dir, now)
+	if err != nil {
+		t.Fatalf("Open() returned error for DefaultDir path: %v", err)
+	}
+	defer file.Close()
+
+	wantPath := filepath.Join(wantDir, ID(now)+".jsonl")
+	if file.Name() != wantPath {
+		t.Fatalf("Open() file path = %q, want %q", file.Name(), wantPath)
+	}
+	if _, err := file.WriteString("session record\n"); err != nil {
+		t.Fatalf("writing session log: %v", err)
+	}
+	got, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("reading session log: %v", err)
+	}
+	if string(got) != "session record\n" {
+		t.Fatalf("session log content = %q, want %q", got, "session record\\n")
+	}
+}

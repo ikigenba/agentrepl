@@ -23,7 +23,7 @@ drives one phase per turn; see the `$ralph` skill for that workflow.
 - `cmd/agentrepl/` — composition root: `main.go`.
 - `internal/config/` — config keys, `-c key=value` parsing, defaults.
 - `internal/catalog/` — providers and their curated models.
-- `internal/session/` — conversation state and the `~/.agentkit/<id>.jsonl` log.
+- `internal/session/` — conversation state and the `~/.agentrepl/logs/<id>.jsonl` log.
 - `internal/tools/` — the built-in local tools (bash, read, write, edit).
 - `internal/repl/` — the loop: args, commands, help, rendering seams.
 - `internal/render/` — decorated vs. raw transcript rendering.

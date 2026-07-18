@@ -13,6 +13,7 @@ import (
 
 	"github.com/ikigenba/agentrepl/internal/render"
 	"github.com/ikigenba/agentrepl/internal/repl"
+	"github.com/ikigenba/agentrepl/internal/session"
 )
 
 func main() {
@@ -56,7 +57,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
 		Getenv:   os.Getenv,
 		Now:      time.Now,
 		Waiter:   waiter,
-		LogDir:   filepath.Join(home, ".agentkit"),
+		LogDir:   session.DefaultDir(home),
 		AuthFile: filepath.Join(home, ".agentrepl", "auth.json"),
 	}, opts)
 }

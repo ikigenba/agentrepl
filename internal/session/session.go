@@ -13,6 +13,11 @@ func ID(t time.Time) string {
 	return t.Format(idLayout)
 }
 
+// DefaultDir returns the default session log directory beneath home.
+func DefaultDir(home string) string {
+	return filepath.Join(home, ".agentrepl", "logs")
+}
+
 // Open ensures dir exists and opens dir/<ID(now)>.jsonl unbuffered for writing,
 // returning the file and the id.
 func Open(dir string, now time.Time) (*os.File, string, error) {

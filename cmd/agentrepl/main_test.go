@@ -20,12 +20,12 @@ func TestRunWiresHomeLogDirAndExitCodes(t *testing.T) {
 	if errOut.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", errOut.String())
 	}
-	matches, err := filepath.Glob(filepath.Join(home, ".agentkit", "*.jsonl"))
+	matches, err := filepath.Glob(filepath.Join(home, ".agentrepl", "logs", "*.jsonl"))
 	if err != nil {
 		t.Fatalf("checking log dir: %v", err)
 	}
 	if len(matches) != 1 {
-		t.Fatalf("logs = %v, want one log under ~/.agentkit", matches)
+		t.Fatalf("logs = %v, want one log under ~/.agentrepl/logs", matches)
 	}
 
 	out.Reset()
