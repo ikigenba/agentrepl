@@ -17,7 +17,7 @@ One line per Decision, in number order — file, label, and the Verification ids
 - **D7** `project/design/D07.md` — Usage & cost reporting
   - ids: R-5J67-0U4U, R-ONJY-6PJG, R-OORU-KHA5, R-OPZQ-Y90U, R-OR7N-C0RJ, R-OSFJ-PSI8, R-OUVC-HBZM, R-OW38-V3QB
 - **D8** `project/design/D08.md` — Session log & session-id
-  - ids: R-8GF4-LRYU, R-8HN0-ZJPJ, R-8IUX-DBG8, R-8K2T-R36X
+  - ids: R-8GF4-LRYU, R-GUN2-2ULO, R-8HN0-ZJPJ, R-8IUX-DBG8, R-8K2T-R36X
 - **D9** `project/design/D09.md` — Slash-command dispatch & the command set
   - ids: R-55RA-TCZ7, R-BI0J-TIHX, R-BJ8G-7A8M, R-BKGC-L1ZB, R-BLO8-YTQ0, R-BMW5-CLGP, R-BO41-QD7E
 - **D10** `project/design/D10.md` — Built-in tools (bash / read / write / edit)
@@ -90,6 +90,7 @@ R-FZCE-VXJL  D3  project/design/D03.md
 R-G304-18RO  D3  project/design/D03.md
 R-G480-F0ID  D5  project/design/D05.md
 R-G5FW-SS92  D5  project/design/D05.md
+R-GUN2-2ULO  D8  project/design/D08.md
 R-H7HT-LNRE  D11  project/design/D11.md
 R-H8PP-ZFI3  D11  project/design/D11.md
 R-H9XM-D78S  D11  project/design/D11.md

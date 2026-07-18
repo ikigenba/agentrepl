@@ -53,7 +53,7 @@ These fixed, promised values the design must use verbatim and never re-declare:
 - **Config separator:** agentkit config settings are passed as `key=value` (an equals sign), with flat, unprefixed keys named for each setting (e.g. `temperature`, `max_tokens`, `auth`, `base_url`); reasoning uses the selected model's own native term as the key (`effort`, `thinking_budget`, `thinking_level`, or `thinking`).
 - **Credential variables:** one environment variable per provider, of the form `PROVIDER_API_KEY` — `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`.
 - **Subscription auth file:** defaults to `~/.agentrepl/auth.json`; its location is a config setting (`auth_file`), so a file created elsewhere by `oauth-login` can be pointed at instead.
-- **Session log location:** `~/.agentkit/<session-id>.jsonl`, one file per run.
+- **Session log location:** `~/.agentrepl/logs/<session-id>.jsonl`, one file per run — agentrepl's on-disk footprint lives entirely under `~/.agentrepl/`.
 
 ## What we promise (user-facing behavior)
 
