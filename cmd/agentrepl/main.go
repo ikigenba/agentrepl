@@ -59,7 +59,9 @@ func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
 		Waiter:   waiter,
 		LogDir:   filepath.Join(home, ".agentkit"),
 		AuthFile: filepath.Join(home, ".agentrepl", "auth.json"),
-		Login:    subscription.Login,
+		BeginLogin: func() (repl.LoginFlow, error) {
+			return subscription.BeginLogin()
+		},
 	}, opts)
 }
 

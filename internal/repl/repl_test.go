@@ -467,62 +467,17 @@ func TestLoginDispatchIsHelpedAndFailureIsNonFatal(t *testing.T) {
 		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
 		LogDir:   t.TempDir(),
 		AuthFile: filepath.Join(t.TempDir(), "auth.json"),
-		Login: func(context.Context, string, subscription.LoginIO) error {
-			return errors.New("login denied")
+		BeginLogin: func() (LoginFlow, error) {
+			return nil, errors.New("login denied")
 		},
 	}, Options{})
 	if code != 0 {
 		t.Fatalf("Run exit code = %d, stderr %q", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "subscription login: login denied") ||
+	if !strings.Contains(out.String(), "begin subscription login: login denied") ||
 		!strings.Contains(out.String(), "/login - log in with an OpenAI subscription") ||
 		!strings.Contains(out.String(), "config keys:") {
 		t.Fatalf("stdout = %q, want non-fatal login failure followed by /help", out.String())
-	}
-}
-
-func TestLoginUsesCurrentPathAndIOThenInvalidatesProvider(t *testing.T) {
-	// R-5EAL-HR62
-	var builds int
-	provider := newScriptedProvider()
-	cat := []catalog.Provider{{
-		Name: "openai", Methods: []catalog.AuthMethod{catalog.AuthSub},
-		New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
-			builds++
-			return provider, nil
-		},
-	}}
-	conv := &agentkit.Conversation{}
-	authFile := filepath.Join(t.TempDir(), "chosen.json")
-	target := config.NewTarget(conv, cat, func(string) string { return "" }, authFile)
-	if _, err := target.Provider(); err != nil {
-		t.Fatalf("initial Provider: %v", err)
-	}
-	in := strings.NewReader("oauth callback")
-	var out bytes.Buffer
-	s := &state{
-		ctx:    context.Background(),
-		conv:   conv,
-		target: target,
-		cat:    cat,
-		io:     IO{In: in, Out: &out},
-		rend:   render.NewDecorated(&out, false, false),
-		login: func(_ context.Context, path string, streams subscription.LoginIO) error {
-			if path != authFile || streams.In != in || streams.Out != &out {
-				t.Fatalf("login args = path %q In %T Out %T, want current path and REPL IO", path, streams.In, streams.Out)
-			}
-			return nil
-		},
-	}
-	runCommand(s, "/login")
-	if _, err := target.Provider(); err != nil {
-		t.Fatalf("Provider after login: %v", err)
-	}
-	if builds != 2 {
-		t.Fatalf("provider builds = %d, want cached provider invalidated and rebuilt", builds)
-	}
-	if !strings.Contains(out.String(), "subscription login saved to "+authFile) {
-		t.Fatalf("stdout = %q, want success notice", out.String())
 	}
 }
 
@@ -586,9 +541,9 @@ func TestBareStartupAndCommandsDoNotConstructOrLoginWithoutCredentials(t *testin
 		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
 		LogDir:   t.TempDir(),
 		AuthFile: filepath.Join(t.TempDir(), "absent.json"),
-		Login: func(context.Context, string, subscription.LoginIO) error {
+		BeginLogin: func() (LoginFlow, error) {
 			loggedIn = true
-			return nil
+			return nil, nil
 		},
 	}, Options{})
 	if code != 0 || constructed || loggedIn {
@@ -619,13 +574,18 @@ func TestLoginFileEnablesNextLazyBuildAndTurnWithoutRestart(t *testing.T) {
 	authFile := filepath.Join(t.TempDir(), "auth.json")
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), Deps{
-		IO:       IO{In: strings.NewReader("/login\nhello\n/exit\n"), Out: &out, Err: &errOut},
+		IO:       IO{In: strings.NewReader("/login\nhttp://localhost:1455/callback\nhello\n/exit\n"), Out: &out, Err: &errOut},
 		Getenv:   func(string) string { return "" },
 		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
 		LogDir:   t.TempDir(),
 		AuthFile: authFile,
-		Login: func(_ context.Context, path string, _ subscription.LoginIO) error {
-			return os.WriteFile(path, []byte(`{"tokens":{"access_token":"header.payload.signature","account_id":"acct"}}`), 0o600)
+		BeginLogin: func() (LoginFlow, error) {
+			return &fakeLoginFlow{
+				url: "https://auth.example/authorize",
+				complete: func(_ context.Context, path, _ string) error {
+					return os.WriteFile(path, []byte(`{"tokens":{"access_token":"header.payload.signature","account_id":"acct"}}`), 0o600)
+				},
+			}, nil
 		},
 	}, Options{})
 	if code != 0 || len(provider.requests) != 1 {

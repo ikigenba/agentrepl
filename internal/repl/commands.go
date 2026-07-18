@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -8,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/ikigenba/agentkit"
-	"github.com/ikigenba/agentkit/openai/subscription"
 	"github.com/ikigenba/agentrepl/internal/catalog"
 	"github.com/ikigenba/agentrepl/internal/config"
 	"github.com/ikigenba/agentrepl/internal/render"
@@ -29,7 +29,8 @@ type state struct {
 	rend       render.Renderer
 	color      bool
 	getenv     func(string) string
-	login      func(context.Context, string, subscription.LoginIO) error
+	beginLogin func() (LoginFlow, error)
+	scanner    *bufio.Scanner
 	liveWaiter Waiter
 	waiter     Waiter
 	quit       bool
@@ -142,11 +143,31 @@ func init() {
 			summary: "log in with an OpenAI subscription",
 			usage:   "/login",
 			run: func(s *state, _ string) error {
-				if s.login == nil {
+				if s.beginLogin == nil {
 					return fmt.Errorf("subscription login is unavailable")
 				}
-				if err := s.login(s.ctx, s.target.AuthFile, subscription.LoginIO{In: s.io.In, Out: s.io.Out}); err != nil {
-					return fmt.Errorf("subscription login: %w", err)
+				flow, err := s.beginLogin()
+				if err != nil {
+					return fmt.Errorf("begin subscription login: %w", err)
+				}
+				s.rend.Notice("Open this URL in any browser and authorize: " + flow.AuthorizeURL())
+				s.rend.Notice("The browser will land on a dead http://localhost:1455/ page; this is expected.")
+				s.rend.Notice("Copy the full URL from the address bar and paste it back here.")
+				s.rend.Notice("Paste the full redirect URL (empty line cancels):")
+				if s.scanner == nil {
+					return fmt.Errorf("subscription login input is unavailable")
+				}
+				result, ok := <-scanLine(s.ctx, s.scanner)
+				if !ok || (result.err == nil && strings.TrimSpace(result.line) == "") {
+					s.rend.Notice("subscription login cancelled")
+					return nil
+				}
+				if result.err != nil {
+					return fmt.Errorf("read subscription login redirect: %w", result.err)
+				}
+				redirectURL := strings.TrimSpace(result.line)
+				if err := flow.Complete(s.ctx, s.target.AuthFile, redirectURL); err != nil {
+					return fmt.Errorf("complete subscription login: %w", err)
 				}
 				if _, err := config.Set(s.target, "auth_file", s.target.AuthFile); err != nil {
 					return fmt.Errorf("invalidate provider after login: %w", err)

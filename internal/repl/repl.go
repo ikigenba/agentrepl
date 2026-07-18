@@ -65,7 +65,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		rend:       rend,
 		color:      color,
 		getenv:     d.Getenv,
-		login:      d.Login,
+		beginLogin: d.BeginLogin,
 		liveWaiter: d.Waiter,
 		waiter:     activeWaiter(d.Waiter, d.IO.IsTTY, opts.Raw),
 	}
@@ -76,6 +76,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 	}()
 
 	scanner := bufio.NewScanner(d.IO.In)
+	state.scanner = scanner
 	for {
 		state.rend.Prompt()
 		select {
