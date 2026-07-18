@@ -29,7 +29,7 @@ One line per Decision, in number order — file, label, and the Verification ids
 - **D13** `project/design/D13.md` — Wait status line (`waiting for <model>`)
   - ids: R-6DZ8-F5IK, R-6F74-SX99, R-6HMX-KGQN
 - **D14** `project/design/D14.md` — Subscription auth, `/login`, and lazy credential failure
-  - ids: R-5EAL-HR62, R-5FIH-VIWR, R-5GQE-9ANG, R-5HYA-N2E5
+  - ids: R-LRTQ-4X56, R-LT1M-IOVV, R-LU9I-WGMK, R-5FIH-VIWR, R-5GQE-9ANG, R-5HYA-N2E5
 
 ## Verification ids → Decision
 Every minted id, sorted, mapped to its Decision and file (grep target for id lookup).
@@ -56,7 +56,6 @@ R-5873-KWGL  D12  project/design/D12.md
 R-5AMW-CFXZ  D12  project/design/D12.md
 R-5BUS-Q7OO  D12  project/design/D12.md
 R-5D2P-3ZFD  D12  project/design/D12.md
-R-5EAL-HR62  D14  project/design/D14.md
 R-5FIH-VIWR  D14  project/design/D14.md
 R-5GQE-9ANG  D14  project/design/D14.md
 R-5HYA-N2E5  D14  project/design/D14.md
@@ -103,7 +102,10 @@ R-LL9K-SKDQ  D5  project/design/D05.md
 R-LNPD-K3V4  D5  project/design/D05.md
 R-LOX9-XVLT  D5  project/design/D05.md
 R-LRD2-PF37  D5  project/design/D05.md
+R-LRTQ-4X56  D14  project/design/D14.md
 R-LSKZ-36TW  D5  project/design/D05.md
+R-LT1M-IOVV  D14  project/design/D14.md
+R-LU9I-WGMK  D14  project/design/D14.md
 R-LW8O-8I1Z  D6  project/design/D06.md
 R-LXGK-M9SO  D6  project/design/D06.md
 R-LYK7-Y7ZS  D3  project/design/D03.md
