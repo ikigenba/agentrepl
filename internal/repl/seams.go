@@ -1,7 +1,6 @@
 package repl
 
 import (
-	"context"
 	"io"
 	"time"
 )
@@ -27,12 +26,6 @@ func (nopWaiter) Start(string) {}
 
 func (nopWaiter) Stop() {}
 
-// LoginFlow is one in-flight subscription OAuth login.
-type LoginFlow interface {
-	AuthorizeURL() string
-	Complete(ctx context.Context, path, pastedRedirectURL string) error
-}
-
 // Options is the parsed launch surface.
 type Options struct {
 	Config []string
@@ -41,11 +34,10 @@ type Options struct {
 
 // Deps are the composition-root dependencies Run needs.
 type Deps struct {
-	IO         IO
-	Getenv     func(string) string
-	Now        func() time.Time
-	Waiter     Waiter
-	LogDir     string
-	AuthFile   string
-	BeginLogin func() (LoginFlow, error)
+	IO       IO
+	Getenv   func(string) string
+	Now      func() time.Time
+	Waiter   Waiter
+	LogDir   string
+	AuthFile string
 }

@@ -73,7 +73,7 @@ func TestSubscriptionAuthAndUnsupportedMethods(t *testing.T) {
 	// R-4M8W-P143
 	provider, _ := Lookup(Default(), "openai")
 	path := filepath.Join(t.TempDir(), "auth.json")
-	if err := os.WriteFile(path, []byte(`{"tokens":{"access_token":"header.payload.signature","account_id":"acct"}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"access_token":"header.eyJleHAiOjQxMDI0NDQ4MDAsImh0dHBzOi8vYXBpLm9wZW5haS5jb20vYXV0aCI6eyJjaGF0Z3B0X2FjY291bnRfaWQiOiJhY2N0In19.signature"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := provider.New(func(string) string { return "" }, Options{Auth: AuthSub, AuthFile: path})

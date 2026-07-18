@@ -12,7 +12,7 @@ providers:
   anthropic    auth=key  (ANTHROPIC_API_KEY)
   google       auth=key  (GEMINI_API_KEY)
   openai       auth=key  (OPENAI_API_KEY)
-               auth=sub  (auth_file=~/.agentrepl/auth.json; create with /login)
+               auth=sub  (auth_file=~/.agentrepl/auth.json; create with oauth-login)
   openrouter   auth=key  (OPENROUTER_API_KEY)
   zai          auth=key  (ZAI_API_KEY)
 

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ikigenba/agentkit/openai/subscription"
 	"github.com/ikigenba/agentrepl/internal/render"
 	"github.com/ikigenba/agentrepl/internal/repl"
 )
@@ -59,9 +58,6 @@ func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
 		Waiter:   waiter,
 		LogDir:   filepath.Join(home, ".agentkit"),
 		AuthFile: filepath.Join(home, ".agentrepl", "auth.json"),
-		BeginLogin: func() (repl.LoginFlow, error) {
-			return subscription.BeginLogin()
-		},
 	}, opts)
 }
 

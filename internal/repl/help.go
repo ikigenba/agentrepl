@@ -33,7 +33,7 @@ func WriteHelp(out io.Writer, name string, cat []catalog.Provider) {
 			fmt.Fprintf(out, "  %-12s auth=key  (%s)\n", provider.Name, provider.EnvKey)
 		}
 		if supportsAuth(provider, catalog.AuthSub) {
-			fmt.Fprintln(out, "               auth=sub  (auth_file=~/.agentrepl/auth.json; create with /login)")
+			fmt.Fprintln(out, "               auth=sub  (auth_file=~/.agentrepl/auth.json; create with oauth-login)")
 		}
 	}
 	fmt.Fprintln(out)

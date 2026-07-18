@@ -57,7 +57,6 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 	}
 
 	state := &state{
-		ctx:        ctx,
 		conv:       conv,
 		target:     target,
 		cat:        cat,
@@ -65,7 +64,6 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		rend:       rend,
 		color:      color,
 		getenv:     d.Getenv,
-		beginLogin: d.BeginLogin,
 		liveWaiter: d.Waiter,
 		waiter:     activeWaiter(d.Waiter, d.IO.IsTTY, opts.Raw),
 	}
@@ -76,7 +74,6 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 	}()
 
 	scanner := bufio.NewScanner(d.IO.In)
-	state.scanner = scanner
 	for {
 		state.rend.Prompt()
 		select {
@@ -119,7 +116,7 @@ func providerDirective(target *config.Target, err error) error {
 	}
 	switch method {
 	case catalog.AuthSub:
-		return fmt.Errorf("%w; subscription auth file %q is unavailable: run /login, or set OPENAI_API_KEY then /set auth key, or /set auth_file to an existing Codex login", err, target.AuthFile)
+		return fmt.Errorf("%w; subscription auth file %q is unavailable: run this in another terminal, then take the next turn: %s > %s; or set OPENAI_API_KEY then /set auth key; or /set auth_file to a file produced by oauth-login", err, target.AuthFile, oauthLoginCommand, target.AuthFile)
 	case catalog.AuthKey:
 		if ok && provider.EnvKey != "" {
 			return fmt.Errorf("%w; set %s in the environment", err, provider.EnvKey)
@@ -127,6 +124,8 @@ func providerDirective(target *config.Target, err error) error {
 	}
 	return err
 }
+
+const oauthLoginCommand = `oauth-login --auth-url https://auth.openai.com/oauth/authorize --token-url https://auth.openai.com/oauth/token --client-id app_EMoamEEZ73f0CkXaXp7hrann --scope "openid profile email offline_access" --port 1455 --callback-path /auth/callback`
 
 type scanResult struct {
 	line string

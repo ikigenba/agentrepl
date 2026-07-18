@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -458,69 +459,79 @@ func TestProvidersListsEachAuthMethodWithoutModels(t *testing.T) {
 	}
 }
 
-func TestLoginDispatchIsHelpedAndFailureIsNonFatal(t *testing.T) {
-	// R-56Z7-74PW
-	var out, errOut bytes.Buffer
-	code := Run(context.Background(), Deps{
-		IO:       IO{In: strings.NewReader("/login\n/help\n/exit\n"), Out: &out, Err: &errOut},
-		Getenv:   func(string) string { return "" },
-		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
-		LogDir:   t.TempDir(),
-		AuthFile: filepath.Join(t.TempDir(), "auth.json"),
-		BeginLogin: func() (LoginFlow, error) {
-			return nil, errors.New("login denied")
+func TestProviderBuildFailureRendersMethodDirectiveAndContinuesWithoutSend(t *testing.T) {
+	// R-E6D8-E6BS
+	tests := []struct {
+		name      string
+		opts      Options
+		want      []string
+		wantOAuth bool
+	}{
+		{
+			name:      "subscription names current auth file and oauth-login command",
+			want:      []string{"/set auth key", "/set auth_file", "config keys:"},
+			wantOAuth: true,
 		},
-	}, Options{})
-	if code != 0 {
-		t.Fatalf("Run exit code = %d, stderr %q", code, errOut.String())
+		{
+			name: "key names missing environment variable",
+			opts: Options{Config: []string{"auth=key"}},
+			want: []string{"OPENAI_API_KEY", "set OPENAI_API_KEY in the environment", "config keys:"},
+		},
 	}
-	if !strings.Contains(out.String(), "begin subscription login: login denied") ||
-		!strings.Contains(out.String(), "/login - log in with an OpenAI subscription") ||
-		!strings.Contains(out.String(), "config keys:") {
-		t.Fatalf("stdout = %q, want non-fatal login failure followed by /help", out.String())
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var builds int
+			sendProbe := newScriptedProvider(successRound("must not send", usageOne()))
+			originalCatalog := defaultCatalog
+			defaultCatalog = func() []catalog.Provider {
+				return []catalog.Provider{{
+					Name: "openai", EnvKey: "OPENAI_API_KEY", Methods: []catalog.AuthMethod{catalog.AuthSub, catalog.AuthKey},
+					New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
+						builds++
+						if opts.Auth == catalog.AuthKey {
+							return sendProbe, fmt.Errorf("%w: OPENAI_API_KEY", catalog.ErrMissingKey)
+						}
+						return sendProbe, errors.New("bad subscription file")
+					},
+				}}
+			}
+			t.Cleanup(func() { defaultCatalog = originalCatalog })
 
-func TestLazyBuildFailureIsMethodDirectiveAndLoopContinuesWithoutSend(t *testing.T) {
-	// R-5FIH-VIWR
-	var builds int
-	originalCatalog := defaultCatalog
-	defaultCatalog = func() []catalog.Provider {
-		return []catalog.Provider{{
-			Name: "openai", EnvKey: "OPENAI_API_KEY", Methods: []catalog.AuthMethod{catalog.AuthSub, catalog.AuthKey},
-			New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
-				builds++
-				if opts.Auth == catalog.AuthKey {
-					return nil, fmt.Errorf("%w: OPENAI_API_KEY", catalog.ErrMissingKey)
+			var out, errOut bytes.Buffer
+			authFile := filepath.Join(t.TempDir(), "custom auth.json")
+			code := Run(context.Background(), Deps{
+				IO:       IO{In: strings.NewReader("first\n/help\n/exit\n"), Out: &out, Err: &errOut},
+				Getenv:   func(string) string { return "" },
+				Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+				LogDir:   t.TempDir(),
+				AuthFile: authFile,
+			}, tt.opts)
+			if code != 0 || builds != 1 || len(sendProbe.requests) != 0 {
+				t.Fatalf("Run code/builds/sends = %d/%d/%d, stderr %q", code, builds, len(sendProbe.requests), errOut.String())
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("stdout = %q, want directive/continuation marker %q", out.String(), want)
 				}
-				return nil, errors.New("bad subscription file")
-			},
-		}}
-	}
-	t.Cleanup(func() { defaultCatalog = originalCatalog })
-
-	var out, errOut bytes.Buffer
-	authFile := filepath.Join(t.TempDir(), "missing.json")
-	code := Run(context.Background(), Deps{
-		IO:       IO{In: strings.NewReader("first\n/set auth key\nsecond\n/help\n/exit\n"), Out: &out, Err: &errOut},
-		Getenv:   func(string) string { return "" },
-		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
-		LogDir:   t.TempDir(),
-		AuthFile: authFile,
-	}, Options{})
-	if code != 0 || builds != 2 {
-		t.Fatalf("Run code/builds = %d/%d, stderr %q", code, builds, errOut.String())
-	}
-	for _, want := range []string{"run /login", "/set auth key", "/set auth_file", authFile, "set OPENAI_API_KEY in the environment", "config keys:"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("stdout = %q, want directive/continuation marker %q", out.String(), want)
-		}
+			}
+			if tt.wantOAuth {
+				command := oauthLoginCommand + " > " + authFile
+				if !strings.Contains(out.String(), command) {
+					t.Fatalf("stdout = %q, want complete command %q", out.String(), command)
+				}
+				for _, line := range strings.Split(out.String(), "\n") {
+					if strings.Contains(line, "oauth-login --auth-url") && !strings.Contains(line, command) {
+						t.Fatalf("oauth-login command was split or incomplete: %q", line)
+					}
+				}
+			}
+		})
 	}
 }
 
-func TestBareStartupAndCommandsDoNotConstructOrLoginWithoutCredentials(t *testing.T) {
+func TestBareStartupAndCommandsDoNotConstructWithoutCredentials(t *testing.T) {
 	// R-5GQE-9ANG
-	constructed, loggedIn := false, false
+	constructed := false
 	originalCatalog := defaultCatalog
 	defaultCatalog = func() []catalog.Provider {
 		providers := catalog.Default()
@@ -541,29 +552,37 @@ func TestBareStartupAndCommandsDoNotConstructOrLoginWithoutCredentials(t *testin
 		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
 		LogDir:   t.TempDir(),
 		AuthFile: filepath.Join(t.TempDir(), "absent.json"),
-		BeginLogin: func() (LoginFlow, error) {
-			loggedIn = true
-			return nil, nil
-		},
 	}, Options{})
-	if code != 0 || constructed || loggedIn {
-		t.Fatalf("Run code=%d constructed=%v loggedIn=%v stderr=%q", code, constructed, loggedIn, errOut.String())
+	if code != 0 || constructed {
+		t.Fatalf("Run code=%d constructed=%v stderr=%q", code, constructed, errOut.String())
 	}
-	if !strings.Contains(out.String(), "you ›") || !strings.Contains(out.String(), "/login") || !strings.Contains(out.String(), "openai sub") {
+	if !strings.Contains(out.String(), "you ›") || !strings.Contains(out.String(), "openai sub") {
 		t.Fatalf("stdout = %q, want prompt and normal slash-command answers", out.String())
 	}
 }
 
-func TestLoginFileEnablesNextLazyBuildAndTurnWithoutRestart(t *testing.T) {
-	// R-5HYA-N2E5
-	provider := newScriptedProvider(successRound("logged in", usageOne()))
+func TestExternalAuthFileAppearanceEnablesNextLazyTurnWithoutRestart(t *testing.T) {
+	// R-E7L4-RY2H
+	provider := newScriptedProvider(successRound("authenticated", usageOne()))
+	var builds int
+	providers := catalog.Default()
+	var buildOpenAI func(func(string) string, catalog.Options) (agentkit.Provider, error)
+	for _, candidate := range providers {
+		if candidate.Name == "openai" {
+			buildOpenAI = candidate.New
+		}
+	}
+	if buildOpenAI == nil {
+		t.Fatal("default catalog has no openai provider")
+	}
 	originalCatalog := defaultCatalog
 	defaultCatalog = func() []catalog.Provider {
 		return []catalog.Provider{{
-			Name: "openai", Methods: []catalog.AuthMethod{catalog.AuthSub},
+			Name: "openai", EnvKey: "OPENAI_API_KEY", Methods: []catalog.AuthMethod{catalog.AuthSub, catalog.AuthKey},
 			New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
-				if _, err := os.ReadFile(opts.AuthFile); err != nil {
-					return nil, fmt.Errorf("auth file: %w", err)
+				builds++
+				if _, err := buildOpenAI(func(string) string { return "" }, opts); err != nil {
+					return nil, err
 				}
 				return provider, nil
 			},
@@ -572,31 +591,64 @@ func TestLoginFileEnablesNextLazyBuildAndTurnWithoutRestart(t *testing.T) {
 	t.Cleanup(func() { defaultCatalog = originalCatalog })
 
 	authFile := filepath.Join(t.TempDir(), "auth.json")
+	payload, err := json.Marshal(map[string]any{
+		"exp":                         float64(4102444800),
+		"https://api.openai.com/auth": map[string]string{"chatgpt_account_id": "acct-test"},
+	})
+	if err != nil {
+		t.Fatalf("marshal token payload: %v", err)
+	}
+	tokenResponse, err := json.Marshal(map[string]string{
+		"access_token": "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature",
+	})
+	if err != nil {
+		t.Fatalf("marshal token response: %v", err)
+	}
+	in := &stagedReader{
+		chunks: [][]byte{[]byte("first\n"), []byte("second\n/exit\n")},
+		beforeChunk: func(index int) {
+			if index == 1 {
+				if err := os.WriteFile(authFile, tokenResponse, 0o600); err != nil {
+					t.Errorf("write external auth file: %v", err)
+				}
+			}
+		},
+	}
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), Deps{
-		IO:       IO{In: strings.NewReader("/login\nhttp://localhost:1455/callback\nhello\n/exit\n"), Out: &out, Err: &errOut},
+		IO:       IO{In: in, Out: &out, Err: &errOut},
 		Getenv:   func(string) string { return "" },
 		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
 		LogDir:   t.TempDir(),
 		AuthFile: authFile,
-		BeginLogin: func() (LoginFlow, error) {
-			return &fakeLoginFlow{
-				url: "https://auth.example/authorize",
-				complete: func(_ context.Context, path, _ string) error {
-					return os.WriteFile(path, []byte(`{"tokens":{"access_token":"header.payload.signature","account_id":"acct"}}`), 0o600)
-				},
-			}, nil
-		},
 	}, Options{})
-	if code != 0 || len(provider.requests) != 1 {
-		t.Fatalf("Run code=%d requests=%d stderr=%q stdout=%q", code, len(provider.requests), errOut.String(), out.String())
+	if code != 0 || builds != 2 || len(provider.requests) != 1 {
+		t.Fatalf("Run code=%d builds=%d requests=%d stderr=%q stdout=%q", code, builds, len(provider.requests), errOut.String(), out.String())
 	}
-	if !strings.Contains(out.String(), "assistant › logged in") {
+	if !strings.Contains(out.String(), "oauth-login --auth-url") || !strings.Contains(out.String(), "assistant › authenticated") {
 		t.Fatalf("stdout = %q, want successful next turn", out.String())
 	}
 	if _, err := subscription.Load(authFile); err != nil {
-		t.Fatalf("login auth file is not accepted by subscription.Load: %v", err)
+		t.Fatalf("external auth file is not accepted by subscription.Load: %v", err)
 	}
+}
+
+type stagedReader struct {
+	chunks      [][]byte
+	beforeChunk func(int)
+	index       int
+}
+
+func (r *stagedReader) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	if r.beforeChunk != nil {
+		r.beforeChunk(r.index)
+	}
+	chunk := r.chunks[r.index]
+	r.index++
+	return copy(p, chunk), nil
 }
 
 func TestCostUnknownWarningRelaysAndCatalogPricingSuppressesIt(t *testing.T) {
