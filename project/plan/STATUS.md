@@ -34,4 +34,4 @@ The manifest. One Markdown bullet per phase, in build order, each beginning with
 - Phase 29  ✅  realizes D3        — Config resolution, auth keys, defaults & lazy construction
 - Phase 30  ✅  realizes D12       — `--help`: defaults, auth lines, routes & the two-tier footer
 - Phase 31  ✅  realizes D7,D9,D14 — `/login`, `/providers` auth status, lazy-failure directive & cost-unknown relay
-- Phase 32  ⬜  realizes D14       — agentkit v0.4.1 pin + REPL-owned `/login` interaction
+- Phase 32  ✅  realizes D14       — agentkit v0.4.1 pin + REPL-owned `/login` interaction
