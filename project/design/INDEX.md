@@ -19,7 +19,7 @@ One line per Decision, in number order — file, label, and the Verification ids
 - **D8** `project/design/D08.md` — Session log & session-id
   - ids: R-8GF4-LRYU, R-8HN0-ZJPJ, R-8IUX-DBG8, R-8K2T-R36X
 - **D9** `project/design/D09.md` — Slash-command dispatch & the command set
-  - ids: R-55RA-TCZ7, R-56Z7-74PW, R-BI0J-TIHX, R-BJ8G-7A8M, R-BKGC-L1ZB, R-BLO8-YTQ0, R-BMW5-CLGP, R-BO41-QD7E
+  - ids: R-55RA-TCZ7, R-BI0J-TIHX, R-BJ8G-7A8M, R-BKGC-L1ZB, R-BLO8-YTQ0, R-BMW5-CLGP, R-BO41-QD7E
 - **D10** `project/design/D10.md` — Built-in tools (bash / read / write / edit)
   - ids: R-NHBW-446N, R-NIJS-HVXC, R-NKZL-9FEQ, R-NM7H-N75F, R-NNFE-0YW4, R-NONA-EQMT
 - **D11** `project/design/D11.md` — Error handling & REPL resilience
@@ -28,8 +28,8 @@ One line per Decision, in number order — file, label, and the Verification ids
   - ids: R-5873-KWGL, R-5AMW-CFXZ, R-5BUS-Q7OO, R-5D2P-3ZFD, R-6DEO-9TXQ, R-6DEO-KEYS, R-AFZE-5WGV, R-APDX-FP3D, R-FT8W-Z2U4, R-FVOP-QMBI, R-FWWM-4E27, R-FY4I-I5SW, R-ODOF-XOTJ, R-OEWC-BGK8
 - **D13** `project/design/D13.md` — Wait status line (`waiting for <model>`)
   - ids: R-6DZ8-F5IK, R-6F74-SX99, R-6HMX-KGQN
-- **D14** `project/design/D14.md` — Subscription auth, `/login`, and lazy credential failure
-  - ids: R-LRTQ-4X56, R-LT1M-IOVV, R-LU9I-WGMK, R-5FIH-VIWR, R-5GQE-9ANG, R-5HYA-N2E5
+- **D14** `project/design/D14.md` — Subscription auth, the external login, and lazy credential failure
+  - ids: R-E6D8-E6BS, R-5GQE-9ANG, R-E7L4-RY2H
 
 ## Verification ids → Decision
 Every minted id, sorted, mapped to its Decision and file (grep target for id lookup).
@@ -51,14 +51,11 @@ R-523L-O1R4  D3  project/design/D03.md
 R-53BI-1THT  D3  project/design/D03.md
 R-54JE-FL8I  D3  project/design/D03.md
 R-55RA-TCZ7  D9  project/design/D09.md
-R-56Z7-74PW  D9  project/design/D09.md
 R-5873-KWGL  D12  project/design/D12.md
 R-5AMW-CFXZ  D12  project/design/D12.md
 R-5BUS-Q7OO  D12  project/design/D12.md
 R-5D2P-3ZFD  D12  project/design/D12.md
-R-5FIH-VIWR  D14  project/design/D14.md
 R-5GQE-9ANG  D14  project/design/D14.md
-R-5HYA-N2E5  D14  project/design/D14.md
 R-5J67-0U4U  D7  project/design/D07.md
 R-6DEO-9TXQ  D12  project/design/D12.md
 R-6DEO-KEYS  D12  project/design/D12.md
@@ -79,6 +76,8 @@ R-BMW5-CLGP  D9  project/design/D09.md
 R-BO41-QD7E  D9  project/design/D09.md
 R-CCHP-S6AJ  D5  project/design/D05.md
 R-CDPM-5Y18  D5  project/design/D05.md
+R-E6D8-E6BS  D14  project/design/D14.md
+R-E7L4-RY2H  D14  project/design/D14.md
 R-EU69-75V4  D4  project/design/D04.md
 R-EWM1-YPCI  D4  project/design/D04.md
 R-EXTY-CH37  D4  project/design/D04.md
@@ -102,10 +101,7 @@ R-LL9K-SKDQ  D5  project/design/D05.md
 R-LNPD-K3V4  D5  project/design/D05.md
 R-LOX9-XVLT  D5  project/design/D05.md
 R-LRD2-PF37  D5  project/design/D05.md
-R-LRTQ-4X56  D14  project/design/D14.md
 R-LSKZ-36TW  D5  project/design/D05.md
-R-LT1M-IOVV  D14  project/design/D14.md
-R-LU9I-WGMK  D14  project/design/D14.md
 R-LW8O-8I1Z  D6  project/design/D06.md
 R-LXGK-M9SO  D6  project/design/D06.md
 R-LYK7-Y7ZS  D3  project/design/D03.md

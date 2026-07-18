@@ -13,7 +13,7 @@ The restructure landed as a run of agentkit phases (54–64) and is tagged **v0.
 1. **Credential constructors.** Every provider package exposes a sealed `Credential` type; clients are built `pkg.New(cred, opts...)`. The library reads **no** environment variables — the caller supplies key material.
 2. **Advisory catalog.** A new `catalog` package carries the model tables (models, providers, routes, pricing, reasoning specs, context sizes). It is explicitly advisory: "catalog coverage never controls whether a model can be sent to a provider" — unknown model names remain runnable (**free-flow**).
 3. **OpenRouter provider.** A fifth provider, plus per-model `Routes` in the catalog mapping a home-provider model to its wire slug on another provider.
-4. **Subscription auth for OpenAI.** ChatGPT-subscription-backed access via a Codex-CLI-shaped auth file; usage under it reports **notional** cost (what it would have cost), not an extra charge.
+4. **Subscription auth for OpenAI.** ChatGPT-subscription-backed access via an auth file holding the raw OAuth token-endpoint response (created externally by the standalone `oauth-login` CLI); usage under it reports **notional** cost (what it would have cost), not an extra charge.
 5. **Consumer-owned cost resolution.** Per-turn cost resolves: provider-**reported** cost (OpenRouter only) → `Conversation.Pricing` (caller-supplied) → `0` + `WarnCostUnknown`. agentkit no longer prices turns from internal registries.
 6. **Removed surfaces.** The legacy model-ID constants (`anthropic.ModelOpus48`, …), the per-package reasoning inspectors (`anthropic.Reasoning`, `ReasoningInspector`, `SupportedReasoning`), and the reasoning warning codes `WarnReasoningUnsupported`/`WarnReasoningCannotDisable` are **gone**. Reasoning values now pass through to the provider; a value a provider cannot encode is a provider-side error (or, for OpenAI + budget, `ErrInvalidConfig`), not a warn-and-default.
 
@@ -64,21 +64,21 @@ Reasoning encoding is per-provider translation of whatever `ReasoningValue` arri
 
 ---
 
-## 4. OpenAI subscription auth (`openai/subscription`)
+## 4. OpenAI subscription auth (`openai/subscription`, agentkit ≥ v0.5.0)
 
-A concrete `TokenSource` over a Codex-CLI-shaped JSON auth file (fields: `OPENAI_API_KEY`, `tokens{id_token, access_token, refresh_token, account_id}`, `last_refresh`):
+As of 2026-07-18, agentkit v0.5.0 ships **no login flow** — the package is `Load` + `Token` only, over an auth file that is the **raw RFC 6749 token-endpoint response, verbatim** (top-level `access_token`, `refresh_token`, `id_token`; no wrapper, no `account_id` field — the account id is derived inside agentkit from the `chatgpt_account_id` value under the `https://api.openai.com/auth` JWT claim). The prior Codex-CLI wrapper shape is no longer read.
 
 ```go
-func Load(path string) (*Store, error)                       // errors if access_token/account_id missing
-func (s *Store) Token(ctx) (bearer, accountID string, error) // auto-refreshes near JWT expiry; atomic rewrite (temp+rename, 0600)
-func Login(ctx, path string, io LoginIO) error               // headless manual-paste OAuth (auth-code + PKCE); writes path
-type LoginIO struct{ In io.Reader; Out io.Writer }
+func Load(path string) (*Store, error)                       // raw token-response shape; derives account id from JWT claims; loud error otherwise
+func (s *Store) Token(ctx) (bearer, accountID string, error) // auto-refreshes near JWT expiry; atomic rewrite (temp+rename, 0600) in the same raw shape
 ```
 
 Wire-up: `openai.New(openai.Subscription(store))`. Requests go to `chatgpt.com/backend-api/codex/responses` with the account-id header; credential name `openai.subscription`.
 
-- **Contention warning (agentkit docs):** the Store rewrites the file on token refresh; pointing it at the *live* `~/.codex/auth.json` while Codex CLI is also refreshing can strand either party (refresh-token rotation invalidates the prior token). A consumer-owned file avoids this; a user can still point at their Codex file deliberately.
-- `Login` performs the OAuth flow against `auth.openai.com` (print URL, operator pastes the redirect/code back); it is inherently interactive.
+- **The file is produced by the standalone `oauth-login` CLI** (`github.com/ikigenba/oauth-login`) — a generic OAuth authorization-code+PKCE tool that serves its own loopback callback, prints the token response verbatim to stdout, and writes all human-facing output to stderr. Its documented OpenAI invocation (spec-pinned in that repo's design, D06) is, as one line:
+  `oauth-login --auth-url https://auth.openai.com/oauth/authorize --token-url https://auth.openai.com/oauth/token --client-id app_EMoamEEZ73f0CkXaXp7hrann --scope "openid profile email offline_access" --port 1455 --callback-path /auth/callback > <auth_file>`
+  (`--port 1455 --callback-path /auth/callback` match OpenAI's registered redirect URI; no `--callback-host` needed — the default `localhost` is the registered form.)
+- **Contention warning (agentkit docs):** the Store rewrites the file on token refresh, rotating a per-login refresh-token lineage — the file agentrepl refreshes should be one from the operator's own `oauth-login` run, not a copy shared with another live tool.
 - Cost under subscription auth is **notional** — computed like any priced usage, but not an additional charge.
 
 ---
