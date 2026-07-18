@@ -105,7 +105,7 @@ func TestWriteHelpListsDefaultCatalogInOrder(t *testing.T) {
 
 	last := -1
 	for _, provider := range cat {
-		providerLine := fmt.Sprintf("  %-10s  (%s)", provider.Name, provider.EnvKey)
+		providerLine := fmt.Sprintf("  %-12s auth=key  (%s)", provider.Name, provider.EnvKey)
 		index := strings.Index(help, providerLine)
 		if index <= last {
 			t.Fatalf("provider line %q index = %d after %d in help:\n%s", providerLine, index, last, help)
@@ -131,22 +131,6 @@ func TestWriteHelpListsDefaultCatalogInOrder(t *testing.T) {
 			}
 			last += modelIndex
 		}
-	}
-}
-
-func TestWriteHelpGoldenReasoningClausesByKind(t *testing.T) {
-	// R-FVOP-QMBI
-	// R-6DEO-9TXQ
-	// R-ODOF-XOTJ
-	// R-OEWC-BGK8
-	var out bytes.Buffer
-	WriteHelp(&out, "agentrepl-test", catalog.Default())
-	want, err := os.ReadFile(filepath.Join("testdata", "help_reasoning.golden"))
-	if err != nil {
-		t.Fatalf("reading golden: %v", err)
-	}
-	if out.String() != string(want) {
-		t.Fatalf("help output mismatch\nwant:\n%s\ngot:\n%s", want, out.String())
 	}
 }
 

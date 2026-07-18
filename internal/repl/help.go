@@ -19,9 +19,22 @@ func WriteHelp(out io.Writer, name string, cat []catalog.Provider) {
 	fmt.Fprintln(out, "  -h, -help      show this catalog and exit")
 	fmt.Fprintln(out)
 
+	fmt.Fprintln(out, "defaults:")
+	fmt.Fprintln(out, "  provider=openai   model=gpt-5.6-sol   auth=sub")
+	fmt.Fprintln(out)
+
 	fmt.Fprintln(out, "providers:")
 	for _, provider := range cat {
-		fmt.Fprintf(out, "  %-10s  (%s)\n", provider.Name, provider.EnvKey)
+		if len(provider.Methods) == 0 {
+			fmt.Fprintf(out, "  %-10s  (%s)\n", provider.Name, provider.EnvKey)
+			continue
+		}
+		if supportsAuth(provider, catalog.AuthKey) {
+			fmt.Fprintf(out, "  %-12s auth=key  (%s)\n", provider.Name, provider.EnvKey)
+		}
+		if supportsAuth(provider, catalog.AuthSub) {
+			fmt.Fprintln(out, "               auth=sub  (auth_file=~/.agentrepl/auth.json; create with /login)")
+		}
 	}
 	fmt.Fprintln(out)
 
@@ -29,9 +42,29 @@ func WriteHelp(out io.Writer, name string, cat []catalog.Provider) {
 	for _, provider := range cat {
 		fmt.Fprintf(out, "  %s\n", provider.Name)
 		for _, entry := range catalog.Models(provider.Name) {
+			if entry.Provider != provider.Name {
+				_, wireModel, _, ok := catalog.Resolve(provider.Name, entry.Model)
+				if ok {
+					fmt.Fprintf(out, "    %s  -> %s  %s\n", entry.Model, wireModel, reasoningClause(entry.Reasoning))
+					continue
+				}
+			}
 			fmt.Fprintf(out, "    %-24s %s\n", entry.Model, reasoningClause(entry.Reasoning))
 		}
 	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "a bare -c model=NAME must name a cataloged model (provider is derived from it).")
+	fmt.Fprintln(out, "any other model requires -c provider=... too and passes through unvalidated:")
+	fmt.Fprintln(out, "no pricing (cost reports 0), reasoning keys unchecked.")
+}
+
+func supportsAuth(provider catalog.Provider, method catalog.AuthMethod) bool {
+	for _, candidate := range provider.Methods {
+		if candidate == method {
+			return true
+		}
+	}
+	return false
 }
 
 func reasoningClause(spec *agentkit.ReasoningSpec) string {

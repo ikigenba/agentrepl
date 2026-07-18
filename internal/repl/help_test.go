@@ -2,11 +2,34 @@ package repl
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/ikigenba/agentkit"
+	"github.com/ikigenba/agentrepl/internal/catalog"
 )
+
+func TestWriteHelpGoldenIncludesDefaultsAuthRoutesAndTwoTierFooter(t *testing.T) {
+	// R-FVOP-QMBI
+	// R-6DEO-9TXQ
+	// R-ODOF-XOTJ
+	// R-OEWC-BGK8
+	// R-5873-KWGL
+	// R-5AMW-CFXZ
+	// R-5BUS-Q7OO
+	// R-5D2P-3ZFD
+	var out bytes.Buffer
+	WriteHelp(&out, "agentrepl-test", catalog.Default())
+	want, err := os.ReadFile(filepath.Join("testdata", "help_reasoning.golden"))
+	if err != nil {
+		t.Fatalf("reading golden: %v", err)
+	}
+	if out.String() != string(want) {
+		t.Fatalf("help output mismatch\nwant:\n%s\ngot:\n%s", want, out.String())
+	}
+}
 
 func TestWriteHelpMarksMatchingRangeSentinelWithoutTrailingDefault(t *testing.T) {
 	// R-APDX-FP3D

@@ -5,12 +5,16 @@ flags:
   -raw           emit the raw, undecorated message stream
   -h, -help      show this catalog and exit
 
+defaults:
+  provider=openai   model=gpt-5.6-sol   auth=sub
+
 providers:
-  anthropic   (ANTHROPIC_API_KEY)
-  google      (GEMINI_API_KEY)
-  openai      (OPENAI_API_KEY)
-  openrouter  (OPENROUTER_API_KEY)
-  zai         (ZAI_API_KEY)
+  anthropic    auth=key  (ANTHROPIC_API_KEY)
+  google       auth=key  (GEMINI_API_KEY)
+  openai       auth=key  (OPENAI_API_KEY)
+               auth=sub  (auth_file=~/.agentrepl/auth.json; create with /login)
+  openrouter   auth=key  (OPENROUTER_API_KEY)
+  zai          auth=key  (ZAI_API_KEY)
 
 models:
   anthropic
@@ -35,12 +39,16 @@ models:
     gpt-5.6-sol              effort={none|low|*medium|high|xhigh}
     gpt-5.6-terra            effort={none|low|*medium|high|xhigh}
   openrouter
-    glm-4.6                  thinking={*on|off}
-    glm-4.7                  thinking={*on|off}
-    glm-5.1                  effort={high|*max}  (+ toggle)
-    glm-5.2                  effort={high|*max}  (+ toggle)
+    glm-4.6  -> z-ai/glm-4.6  thinking={*on|off}
+    glm-4.7  -> z-ai/glm-4.7  thinking={*on|off}
+    glm-5.1  -> z-ai/glm-5.1  effort={high|*max}  (+ toggle)
+    glm-5.2  -> z-ai/glm-5.2  effort={high|*max}  (+ toggle)
   zai
     glm-4.6                  thinking={*on|off}
     glm-4.7                  thinking={*on|off}
     glm-5.1                  effort={high|*max}  (+ toggle)
     glm-5.2                  effort={high|*max}  (+ toggle)
+
+a bare -c model=NAME must name a cataloged model (provider is derived from it).
+any other model requires -c provider=... too and passes through unvalidated:
+no pricing (cost reports 0), reasoning keys unchecked.
