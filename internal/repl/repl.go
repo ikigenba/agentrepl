@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"github.com/ikigenba/agentkit"
@@ -38,7 +37,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		Log:   log,
 		Tools: tools.All(),
 	}
-	target := config.NewTarget(conv, cat, d.Getenv, filepath.Join(d.LogDir, "auth.json"))
+	target := config.NewTarget(conv, cat, d.Getenv, d.AuthFile)
 	for _, raw := range opts.Config {
 		key, value, err := config.ParsePair(raw)
 		if err != nil {
@@ -58,6 +57,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 	}
 
 	state := &state{
+		ctx:        ctx,
 		conv:       conv,
 		target:     target,
 		cat:        cat,
@@ -65,6 +65,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 		rend:       rend,
 		color:      color,
 		getenv:     d.Getenv,
+		login:      d.Login,
 		liveWaiter: d.Waiter,
 		waiter:     activeWaiter(d.Waiter, d.IO.IsTTY, opts.Raw),
 	}
@@ -97,7 +98,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 				runCommand(state, line)
 			} else {
 				if _, err := state.target.Provider(); err != nil {
-					state.rend.Error(err)
+					state.rend.Error(providerDirective(state.target, err))
 					continue
 				}
 				handleTurn(ctx, state, line)
@@ -107,6 +108,23 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 			}
 		}
 	}
+}
+
+func providerDirective(target *config.Target, err error) error {
+	provider, ok := catalog.Lookup(target.Cat, target.ProviderName)
+	method := catalog.AuthMethod(target.Auth)
+	if method == "" && ok && len(provider.Methods) != 0 {
+		method = provider.Methods[0]
+	}
+	switch method {
+	case catalog.AuthSub:
+		return fmt.Errorf("%w; subscription auth file %q is unavailable: run /login, or set OPENAI_API_KEY then /set auth key, or /set auth_file to an existing Codex login", err, target.AuthFile)
+	case catalog.AuthKey:
+		if ok && provider.EnvKey != "" {
+			return fmt.Errorf("%w; set %s in the environment", err, provider.EnvKey)
+		}
+	}
+	return err
 }
 
 type scanResult struct {

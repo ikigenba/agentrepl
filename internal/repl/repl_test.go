@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ikigenba/agentkit"
+	"github.com/ikigenba/agentkit/openai/subscription"
 	"github.com/ikigenba/agentrepl/internal/catalog"
 	"github.com/ikigenba/agentrepl/internal/config"
 	"github.com/ikigenba/agentrepl/internal/render"
@@ -413,25 +414,269 @@ func TestHelpListsCommandsAndConfigKeys(t *testing.T) {
 	}
 }
 
-func TestProvidersListsEnvPresenceAndModels(t *testing.T) {
-	// R-BPBY-44Y3
-	out, errOut, code := runScriptWithEnv(t, "/providers\n/exit\n", Options{}, func(key string) string {
-		if key == "OPENAI_API_KEY" {
-			return "secret"
-		}
-		return ""
-	})
+func TestProvidersListsEachAuthMethodWithoutModels(t *testing.T) {
+	// R-55RA-TCZ7
+	var out, errOut bytes.Buffer
+	logDir := t.TempDir()
+	authFile := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(authFile, []byte("present"), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	code := Run(context.Background(), Deps{
+		IO: IO{In: strings.NewReader("/providers\n/exit\n"), Out: &out, Err: &errOut},
+		Getenv: func(key string) string {
+			if key == "OPENAI_API_KEY" {
+				return "secret"
+			}
+			return ""
+		},
+		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+		LogDir:   logDir,
+		AuthFile: authFile,
+	}, Options{})
 	if code != 0 {
-		t.Fatalf("Run exit code = %d, stderr %q", code, errOut)
+		t.Fatalf("Run exit code = %d, stderr %q", code, errOut.String())
 	}
 	for _, provider := range catalog.Default() {
-		models := catalog.Models(provider.Name)
-		if len(models) == 0 || !strings.Contains(out, provider.Name) || !strings.Contains(out, provider.EnvKey) || !strings.Contains(out, models[0].Model) {
-			t.Fatalf("stdout = %q, want provider %s with env and models", out, provider.Name)
+		if !strings.Contains(out.String(), provider.Name+" ") {
+			t.Fatalf("stdout = %q, want provider %s", out.String(), provider.Name)
+		}
+		for _, entry := range catalog.Models(provider.Name) {
+			if strings.Contains(out.String(), entry.Model) {
+				t.Fatalf("stdout = %q, contains model %s", out.String(), entry.Model)
+			}
 		}
 	}
-	if !strings.Contains(out, "OPENAI_API_KEY=present") || !strings.Contains(out, "ANTHROPIC_API_KEY=missing") {
-		t.Fatalf("stdout = %q, want env presence markers", out)
+	for _, want := range []string{
+		"openai sub " + authFile + "=present",
+		"openai key OPENAI_API_KEY=present",
+		"anthropic key ANTHROPIC_API_KEY=missing",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("stdout = %q, want %q", out.String(), want)
+		}
+	}
+}
+
+func TestLoginDispatchIsHelpedAndFailureIsNonFatal(t *testing.T) {
+	// R-56Z7-74PW
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), Deps{
+		IO:       IO{In: strings.NewReader("/login\n/help\n/exit\n"), Out: &out, Err: &errOut},
+		Getenv:   func(string) string { return "" },
+		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+		LogDir:   t.TempDir(),
+		AuthFile: filepath.Join(t.TempDir(), "auth.json"),
+		Login: func(context.Context, string, subscription.LoginIO) error {
+			return errors.New("login denied")
+		},
+	}, Options{})
+	if code != 0 {
+		t.Fatalf("Run exit code = %d, stderr %q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "subscription login: login denied") ||
+		!strings.Contains(out.String(), "/login - log in with an OpenAI subscription") ||
+		!strings.Contains(out.String(), "config keys:") {
+		t.Fatalf("stdout = %q, want non-fatal login failure followed by /help", out.String())
+	}
+}
+
+func TestLoginUsesCurrentPathAndIOThenInvalidatesProvider(t *testing.T) {
+	// R-5EAL-HR62
+	var builds int
+	provider := newScriptedProvider()
+	cat := []catalog.Provider{{
+		Name: "openai", Methods: []catalog.AuthMethod{catalog.AuthSub},
+		New: func(func(string) string, catalog.Options) (agentkit.Provider, error) {
+			builds++
+			return provider, nil
+		},
+	}}
+	conv := &agentkit.Conversation{}
+	authFile := filepath.Join(t.TempDir(), "chosen.json")
+	target := config.NewTarget(conv, cat, func(string) string { return "" }, authFile)
+	if _, err := target.Provider(); err != nil {
+		t.Fatalf("initial Provider: %v", err)
+	}
+	in := strings.NewReader("oauth callback")
+	var out bytes.Buffer
+	s := &state{
+		ctx:    context.Background(),
+		conv:   conv,
+		target: target,
+		cat:    cat,
+		io:     IO{In: in, Out: &out},
+		rend:   render.NewDecorated(&out, false, false),
+		login: func(_ context.Context, path string, streams subscription.LoginIO) error {
+			if path != authFile || streams.In != in || streams.Out != &out {
+				t.Fatalf("login args = path %q In %T Out %T, want current path and REPL IO", path, streams.In, streams.Out)
+			}
+			return nil
+		},
+	}
+	runCommand(s, "/login")
+	if _, err := target.Provider(); err != nil {
+		t.Fatalf("Provider after login: %v", err)
+	}
+	if builds != 2 {
+		t.Fatalf("provider builds = %d, want cached provider invalidated and rebuilt", builds)
+	}
+	if !strings.Contains(out.String(), "subscription login saved to "+authFile) {
+		t.Fatalf("stdout = %q, want success notice", out.String())
+	}
+}
+
+func TestLazyBuildFailureIsMethodDirectiveAndLoopContinuesWithoutSend(t *testing.T) {
+	// R-5FIH-VIWR
+	var builds int
+	originalCatalog := defaultCatalog
+	defaultCatalog = func() []catalog.Provider {
+		return []catalog.Provider{{
+			Name: "openai", EnvKey: "OPENAI_API_KEY", Methods: []catalog.AuthMethod{catalog.AuthSub, catalog.AuthKey},
+			New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
+				builds++
+				if opts.Auth == catalog.AuthKey {
+					return nil, fmt.Errorf("%w: OPENAI_API_KEY", catalog.ErrMissingKey)
+				}
+				return nil, errors.New("bad subscription file")
+			},
+		}}
+	}
+	t.Cleanup(func() { defaultCatalog = originalCatalog })
+
+	var out, errOut bytes.Buffer
+	authFile := filepath.Join(t.TempDir(), "missing.json")
+	code := Run(context.Background(), Deps{
+		IO:       IO{In: strings.NewReader("first\n/set auth key\nsecond\n/help\n/exit\n"), Out: &out, Err: &errOut},
+		Getenv:   func(string) string { return "" },
+		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+		LogDir:   t.TempDir(),
+		AuthFile: authFile,
+	}, Options{})
+	if code != 0 || builds != 2 {
+		t.Fatalf("Run code/builds = %d/%d, stderr %q", code, builds, errOut.String())
+	}
+	for _, want := range []string{"run /login", "/set auth key", "/set auth_file", authFile, "set OPENAI_API_KEY in the environment", "config keys:"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("stdout = %q, want directive/continuation marker %q", out.String(), want)
+		}
+	}
+}
+
+func TestBareStartupAndCommandsDoNotConstructOrLoginWithoutCredentials(t *testing.T) {
+	// R-5GQE-9ANG
+	constructed, loggedIn := false, false
+	originalCatalog := defaultCatalog
+	defaultCatalog = func() []catalog.Provider {
+		providers := catalog.Default()
+		for i := range providers {
+			providers[i].New = func(func(string) string, catalog.Options) (agentkit.Provider, error) {
+				constructed = true
+				return nil, errors.New("unexpected construction")
+			}
+		}
+		return providers
+	}
+	t.Cleanup(func() { defaultCatalog = originalCatalog })
+
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), Deps{
+		IO:       IO{In: strings.NewReader("/help\n/providers\n/exit\n"), Out: &out, Err: &errOut, IsTTY: true},
+		Getenv:   func(string) string { return "" },
+		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+		LogDir:   t.TempDir(),
+		AuthFile: filepath.Join(t.TempDir(), "absent.json"),
+		Login: func(context.Context, string, subscription.LoginIO) error {
+			loggedIn = true
+			return nil
+		},
+	}, Options{})
+	if code != 0 || constructed || loggedIn {
+		t.Fatalf("Run code=%d constructed=%v loggedIn=%v stderr=%q", code, constructed, loggedIn, errOut.String())
+	}
+	if !strings.Contains(out.String(), "you ›") || !strings.Contains(out.String(), "/login") || !strings.Contains(out.String(), "openai sub") {
+		t.Fatalf("stdout = %q, want prompt and normal slash-command answers", out.String())
+	}
+}
+
+func TestLoginFileEnablesNextLazyBuildAndTurnWithoutRestart(t *testing.T) {
+	// R-5HYA-N2E5
+	provider := newScriptedProvider(successRound("logged in", usageOne()))
+	originalCatalog := defaultCatalog
+	defaultCatalog = func() []catalog.Provider {
+		return []catalog.Provider{{
+			Name: "openai", Methods: []catalog.AuthMethod{catalog.AuthSub},
+			New: func(_ func(string) string, opts catalog.Options) (agentkit.Provider, error) {
+				if _, err := os.ReadFile(opts.AuthFile); err != nil {
+					return nil, fmt.Errorf("auth file: %w", err)
+				}
+				return provider, nil
+			},
+		}}
+	}
+	t.Cleanup(func() { defaultCatalog = originalCatalog })
+
+	authFile := filepath.Join(t.TempDir(), "auth.json")
+	var out, errOut bytes.Buffer
+	code := Run(context.Background(), Deps{
+		IO:       IO{In: strings.NewReader("/login\nhello\n/exit\n"), Out: &out, Err: &errOut},
+		Getenv:   func(string) string { return "" },
+		Now:      func() time.Time { return time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC) },
+		LogDir:   t.TempDir(),
+		AuthFile: authFile,
+		Login: func(_ context.Context, path string, _ subscription.LoginIO) error {
+			return os.WriteFile(path, []byte(`{"tokens":{"access_token":"header.payload.signature","account_id":"acct"}}`), 0o600)
+		},
+	}, Options{})
+	if code != 0 || len(provider.requests) != 1 {
+		t.Fatalf("Run code=%d requests=%d stderr=%q stdout=%q", code, len(provider.requests), errOut.String(), out.String())
+	}
+	if !strings.Contains(out.String(), "assistant › logged in") {
+		t.Fatalf("stdout = %q, want successful next turn", out.String())
+	}
+	if _, err := subscription.Load(authFile); err != nil {
+		t.Fatalf("login auth file is not accepted by subscription.Load: %v", err)
+	}
+}
+
+func TestCostUnknownWarningRelaysAndCatalogPricingSuppressesIt(t *testing.T) {
+	// R-5J67-0U4U
+	untrustedRound := func() *agentkit.RoundTrip {
+		return agentkit.NewRoundTrip(agentkit.Message{
+			Role: agentkit.RoleAssistant, Blocks: []agentkit.Block{agentkit.TextBlock{Text: "ok"}},
+		}, agentkit.FinishStop, usageOne(), nil, nil, 0, false)
+	}
+
+	unknownRenderer := &recordingRenderer{}
+	unknown := &state{
+		conv:   &agentkit.Conversation{Provider: newScriptedProvider(untrustedRound()), Model: "free-flow"},
+		rend:   unknownRenderer,
+		waiter: nopWaiter{},
+	}
+	handleTurn(context.Background(), unknown, "hello")
+	if len(unknownRenderer.warnings) != 1 || unknownRenderer.warnings[0].Code != agentkit.WarnCostUnknown {
+		t.Fatalf("unknown warnings = %#v, want WarnCostUnknown", unknownRenderer.warnings)
+	}
+	if len(unknownRenderer.turnCosts) != 1 || unknownRenderer.turnCosts[0] != 0 {
+		t.Fatalf("unknown turn costs = %#v, want zero", unknownRenderer.turnCosts)
+	}
+
+	pricedRenderer := &recordingRenderer{}
+	pricedConv := &agentkit.Conversation{}
+	config.NewTarget(pricedConv, catalog.Default(), func(string) string { return "" }, filepath.Join(t.TempDir(), "auth.json"))
+	if pricedConv.Pricing == nil {
+		t.Fatal("cataloged default did not install Entry.Pricing")
+	}
+	pricedConv.Provider = newScriptedProvider(untrustedRound())
+	priced := &state{
+		conv:   pricedConv,
+		rend:   pricedRenderer,
+		waiter: nopWaiter{},
+	}
+	handleTurn(context.Background(), priced, "hello")
+	wantCost := pricedConv.Pricing.Cost(usageOne())
+	if len(pricedRenderer.warnings) != 0 || len(pricedRenderer.turnCosts) != 1 || pricedRenderer.turnCosts[0] != wantCost {
+		t.Fatalf("priced warnings/costs = %#v/%#v, want none/%v", pricedRenderer.warnings, pricedRenderer.turnCosts, wantCost)
 	}
 }
 
@@ -1120,7 +1365,9 @@ func (w *recordingWaiter) append(call string) {
 }
 
 type recordingRenderer struct {
-	calls *[]string
+	calls     *[]string
+	warnings  []agentkit.Warning
+	turnCosts []agentkit.Cost
 }
 
 func (r *recordingRenderer) Prompt() {}
@@ -1131,13 +1378,15 @@ func (r *recordingRenderer) Event(ev agentkit.Event) {
 	r.append(fmt.Sprintf("render:event:%T", ev))
 }
 
-func (r *recordingRenderer) Usage(agentkit.Usage, agentkit.Cost, agentkit.Cost) {
+func (r *recordingRenderer) Usage(_ agentkit.Usage, turn agentkit.Cost, _ agentkit.Cost) {
+	r.turnCosts = append(r.turnCosts, turn)
 	r.append("render:usage")
 }
 
 func (r *recordingRenderer) Summary(agentkit.Usage, agentkit.Cost) {}
 
 func (r *recordingRenderer) Warning(w agentkit.Warning) {
+	r.warnings = append(r.warnings, w)
 	r.append("render:warning:" + w.Detail)
 }
 
@@ -1150,7 +1399,9 @@ func (r *recordingRenderer) Notice(line string) {
 }
 
 func (r *recordingRenderer) append(call string) {
-	*r.calls = append(*r.calls, call)
+	if r.calls != nil {
+		*r.calls = append(*r.calls, call)
+	}
 }
 
 func newWaiterTestState(calls *[]string, provider agentkit.Provider) *state {

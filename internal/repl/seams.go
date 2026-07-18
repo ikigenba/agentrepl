@@ -1,8 +1,11 @@
 package repl
 
 import (
+	"context"
 	"io"
 	"time"
+
+	"github.com/ikigenba/agentkit/openai/subscription"
 )
 
 type IO struct {
@@ -34,9 +37,11 @@ type Options struct {
 
 // Deps are the composition-root dependencies Run needs.
 type Deps struct {
-	IO     IO
-	Getenv func(string) string
-	Now    func() time.Time
-	Waiter Waiter
-	LogDir string
+	IO       IO
+	Getenv   func(string) string
+	Now      func() time.Time
+	Waiter   Waiter
+	LogDir   string
+	AuthFile string
+	Login    func(context.Context, string, subscription.LoginIO) error
 }

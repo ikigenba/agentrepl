@@ -1,11 +1,14 @@
 package repl
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
 	"github.com/ikigenba/agentkit"
+	"github.com/ikigenba/agentkit/openai/subscription"
 	"github.com/ikigenba/agentrepl/internal/catalog"
 	"github.com/ikigenba/agentrepl/internal/config"
 	"github.com/ikigenba/agentrepl/internal/render"
@@ -18,6 +21,7 @@ type command struct {
 }
 
 type state struct {
+	ctx        context.Context
 	conv       *agentkit.Conversation
 	target     *config.Target
 	cat        []catalog.Provider
@@ -25,6 +29,7 @@ type state struct {
 	rend       render.Renderer
 	color      bool
 	getenv     func(string) string
+	login      func(context.Context, string, subscription.LoginIO) error
 	liveWaiter Waiter
 	waiter     Waiter
 	quit       bool
@@ -113,17 +118,40 @@ func init() {
 			usage:   "/providers",
 			run: func(s *state, _ string) error {
 				for _, provider := range s.cat {
-					status := "missing"
-					if s.getenv(provider.EnvKey) != "" {
-						status = "present"
+					for _, method := range provider.Methods {
+						switch method {
+						case catalog.AuthKey:
+							status := "missing"
+							if s.getenv(provider.EnvKey) != "" {
+								status = "present"
+							}
+							s.rend.Notice(fmt.Sprintf("%s key %s=%s", provider.Name, provider.EnvKey, status))
+						case catalog.AuthSub:
+							status := "missing"
+							if info, err := os.Stat(s.target.AuthFile); err == nil && !info.IsDir() {
+								status = "present"
+							}
+							s.rend.Notice(fmt.Sprintf("%s sub %s=%s", provider.Name, s.target.AuthFile, status))
+						}
 					}
-					entries := catalog.Models(provider.Name)
-					models := make([]string, len(entries))
-					for i, entry := range entries {
-						models[i] = entry.Model
-					}
-					s.rend.Notice(fmt.Sprintf("%s %s=%s models=%s", provider.Name, provider.EnvKey, status, strings.Join(models, ", ")))
 				}
+				return nil
+			},
+		},
+		"login": {
+			summary: "log in with an OpenAI subscription",
+			usage:   "/login",
+			run: func(s *state, _ string) error {
+				if s.login == nil {
+					return fmt.Errorf("subscription login is unavailable")
+				}
+				if err := s.login(s.ctx, s.target.AuthFile, subscription.LoginIO{In: s.io.In, Out: s.io.Out}); err != nil {
+					return fmt.Errorf("subscription login: %w", err)
+				}
+				if _, err := config.Set(s.target, "auth_file", s.target.AuthFile); err != nil {
+					return fmt.Errorf("invalidate provider after login: %w", err)
+				}
+				s.rend.Notice("subscription login saved to " + s.target.AuthFile)
 				return nil
 			},
 		},
