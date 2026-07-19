@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,5 +53,40 @@ func TestRunWiresHomeLogDirAndExitCodes(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "usage: agentrepl") || !strings.Contains(out.String(), "providers:") {
 		t.Fatalf("stdout = %q, want self-describing help", out.String())
+	}
+}
+
+func TestRunReportsWorkingDirectoryFailureAsStartupFatal(t *testing.T) {
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() before test: %v", err)
+	}
+	parent := t.TempDir()
+	cwd := filepath.Join(parent, "removed")
+	if err := os.Mkdir(cwd, 0o755); err != nil {
+		t.Fatalf("os.Mkdir(%q): %v", cwd, err)
+	}
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatalf("os.Chdir(%q): %v", cwd, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Errorf("restore working directory to %q: %v", previous, err)
+		}
+	})
+	if err := os.Remove(cwd); err != nil {
+		t.Fatalf("os.Remove(%q): %v", cwd, err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run(nil, strings.NewReader("/exit\n"), &out, &errOut, false)
+	if code != 1 {
+		t.Fatalf("working-directory failure exit code = %d, want 1", code)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty for startup fatal", out.String())
+	}
+	if !strings.Contains(errOut.String(), "startup: working dir:") {
+		t.Fatalf("stderr = %q, want working-directory startup error", errOut.String())
 	}
 }

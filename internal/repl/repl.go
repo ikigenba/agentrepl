@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"github.com/ikigenba/agentkit"
+	"github.com/ikigenba/agentkit/toolkit"
 	"github.com/ikigenba/agentrepl/internal/catalog"
 	"github.com/ikigenba/agentrepl/internal/config"
 	"github.com/ikigenba/agentrepl/internal/render"
 	"github.com/ikigenba/agentrepl/internal/session"
-	"github.com/ikigenba/agentrepl/internal/tools"
 )
 
 // Run opens the session log, builds the conversation, applies startup config,
@@ -33,10 +33,7 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 	cat := defaultCatalog()
 	color := d.IO.IsTTY && d.Getenv("NO_COLOR") == ""
 	rend := newRenderer(d.IO.Out, color, d.IO.IsTTY, opts.Raw)
-	conv := &agentkit.Conversation{
-		Log:   log,
-		Tools: tools.All(),
-	}
+	conv := newConversation(log, d.CWD)
 	target := config.NewTarget(conv, cat, d.Getenv, d.AuthFile)
 	for _, raw := range opts.Config {
 		key, value, err := config.ParsePair(raw)
@@ -105,6 +102,13 @@ func Run(ctx context.Context, d Deps, opts Options) int {
 				return state.exitCode
 			}
 		}
+	}
+}
+
+func newConversation(log io.Writer, cwd string) *agentkit.Conversation {
+	return &agentkit.Conversation{
+		Log:   log,
+		Tools: toolkit.All(cwd),
 	}
 }
 

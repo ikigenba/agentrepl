@@ -33,6 +33,12 @@ func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
 		return 1
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(errOut, "startup: working dir: %v\n", err)
+		return 1
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(errOut, "startup: home dir: %v\n", err)
@@ -59,6 +65,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer, isTTY bool) int {
 		Waiter:   waiter,
 		LogDir:   session.DefaultDir(home),
 		AuthFile: filepath.Join(home, ".agentrepl", "auth.json"),
+		CWD:      cwd,
 	}, opts)
 }
 

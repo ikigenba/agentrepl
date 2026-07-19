@@ -37,6 +37,62 @@ func TestParseArgsCollectsRepeatedConfigInOrder(t *testing.T) {
 	}
 }
 
+func TestNewConversationOffersExactlyToolkitToolsInConventionalOrder(t *testing.T) {
+	// R-W3MV-WRJ7
+	conv := newConversation(io.Discard, t.TempDir())
+	got := make([]string, len(conv.Tools))
+	for i, tool := range conv.Tools {
+		got[i] = tool.Name()
+	}
+	want := []string{"Bash", "Read", "Write", "Edit", "Glob", "Grep"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("conversation tool names = %v, want exactly %v", got, want)
+	}
+}
+
+func TestNewConversationToolkitToolsAreRootedAtProcessWorkingDirectory(t *testing.T) {
+	// R-W4US-AJ9W
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() before test: %v", err)
+	}
+	cwd := t.TempDir()
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatalf("os.Chdir(%q): %v", cwd, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Errorf("restore working directory to %q: %v", previous, err)
+		}
+	})
+
+	resolvedCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() in temp directory: %v", err)
+	}
+	conv := newConversation(io.Discard, resolvedCWD)
+	var write agentkit.Tool
+	for _, tool := range conv.Tools {
+		if tool.Name() == "Write" {
+			write = tool
+			break
+		}
+	}
+	if write == nil {
+		t.Fatal("conversation has no Write tool")
+	}
+	if _, err := write.Call(context.Background(), json.RawMessage(`{"file_path":"nested/note.txt","content":"from cwd"}`)); err != nil {
+		t.Fatalf("Write tool relative call: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(cwd, "nested", "note.txt"))
+	if err != nil {
+		t.Fatalf("read file written beneath cwd: %v", err)
+	}
+	if string(content) != "from cwd" {
+		t.Fatalf("written content = %q, want %q", content, "from cwd")
+	}
+}
+
 func TestParseArgsRawDefaultAndUnknownFlagUsage(t *testing.T) {
 	// R-EWM1-YPCI
 	var usage bytes.Buffer

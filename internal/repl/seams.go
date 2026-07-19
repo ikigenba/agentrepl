@@ -40,4 +40,5 @@ type Deps struct {
 	Waiter   Waiter
 	LogDir   string
 	AuthFile string
+	CWD      string
 }
