@@ -38,4 +38,4 @@ The manifest. One Markdown bullet per phase, in build order, each beginning with
 - Phase 33  ✅  realizes D9,D12,D14 — agentkit v0.5.0 pin + `/login` removed for the external `oauth-login` flow
 - Phase 34  ✅  realizes D8        — Session logs move to `~/.agentrepl/logs/`
 - Phase 35  ✅  realizes —         — agentkit v0.6.0 pin + OpenRouter-native models in `--help`
-- Phase 36  ⬜  realizes D10       — agentkit v0.7.0 pin + adopt the toolkit, delete `internal/tools`
+- Phase 36  ✅  realizes D10       — agentkit v0.7.0 pin + adopt the toolkit, delete `internal/tools`
