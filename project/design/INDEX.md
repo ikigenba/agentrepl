@@ -20,8 +20,8 @@ One line per Decision, in number order — file, label, and the Verification ids
   - ids: R-8GF4-LRYU, R-GUN2-2ULO, R-8HN0-ZJPJ, R-8IUX-DBG8, R-8K2T-R36X
 - **D9** `project/design/D09.md` — Slash-command dispatch & the command set
   - ids: R-55RA-TCZ7, R-BI0J-TIHX, R-BJ8G-7A8M, R-BKGC-L1ZB, R-BLO8-YTQ0, R-BMW5-CLGP, R-BO41-QD7E
-- **D10** `project/design/D10.md` — Built-in tools (bash / read / write / edit)
-  - ids: R-NHBW-446N, R-NIJS-HVXC, R-NKZL-9FEQ, R-NM7H-N75F, R-NNFE-0YW4, R-NONA-EQMT
+- **D10** `project/design/D10.md` — Standard tools via agentkit's toolkit
+  - ids: R-W3MV-WRJ7, R-W4US-AJ9W
 - **D11** `project/design/D11.md` — Error handling & REPL resilience
   - ids: R-H7HT-LNRE, R-H8PP-ZFI3, R-H9XM-D78S, R-HB5I-QYZH, R-HCDF-4QQ6
 - **D12** `project/design/D12.md` — The self-describing `--help` catalog
@@ -111,12 +111,6 @@ R-LZS4-BZQH  D3  project/design/D03.md
 R-M149-RL0R  D6  project/design/D06.md
 R-M4NP-V2P9  D3  project/design/D03.md
 R-M5VM-8UFY  D3  project/design/D03.md
-R-NHBW-446N  D10  project/design/D10.md
-R-NIJS-HVXC  D10  project/design/D10.md
-R-NKZL-9FEQ  D10  project/design/D10.md
-R-NM7H-N75F  D10  project/design/D10.md
-R-NNFE-0YW4  D10  project/design/D10.md
-R-NONA-EQMT  D10  project/design/D10.md
 R-OBNM-N6XX  D5  project/design/D05.md
 R-ODOF-XOTJ  D12  project/design/D12.md
 R-OEWC-BGK8  D12  project/design/D12.md
@@ -128,3 +122,5 @@ R-OSFJ-PSI8  D7  project/design/D07.md
 R-OUVC-HBZM  D7  project/design/D07.md
 R-OW38-V3QB  D7  project/design/D07.md
 R-Q52T-PXCR  D5  project/design/D05.md
+R-W3MV-WRJ7  D10  project/design/D10.md
+R-W4US-AJ9W  D10  project/design/D10.md
