@@ -9,6 +9,22 @@ client.
 
 ## Build & install
 
+Install the latest prebuilt release (no Go toolchain required):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ikigenba/agentrepl/main/install.sh | sh
+```
+
+Set `AGENTREPL_VERSION=v0.1.0` to pin a release. Set `BINDIR` to choose the
+exact destination directory, or `PREFIX` to install under its `bin` directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ikigenba/agentrepl/main/install.sh |
+  AGENTREPL_VERSION=v0.1.0 PREFIX=/usr/local sh
+```
+
+To build from source instead:
+
 ```sh
 make build      # → bin/agentrepl
 make install    # → ~/.local/bin/agentrepl (override with PREFIX=...)
