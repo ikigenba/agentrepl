@@ -41,3 +41,4 @@ The manifest. One Markdown bullet per phase, in build order, each beginning with
 - Phase 36  ✅  realizes D10       — agentkit v0.7.0 pin + adopt the toolkit, delete `internal/tools`
 - Phase 37  ✅  realizes D15       — `-V`/`--version` version reporting, the linker seam & Makefile stamp
 - Phase 38  ✅  realizes D15       — Release distribution: goreleaser, release workflow & `curl | sh` installer
+- Phase 39  ⬜  realizes D15       — README "Releasing" section (branch-first `--follow-tags` cut procedure)
