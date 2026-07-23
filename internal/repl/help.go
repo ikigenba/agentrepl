@@ -12,10 +12,11 @@ import (
 
 // WriteHelp renders the static launch-time catalog.
 func WriteHelp(out io.Writer, name string, cat []catalog.Provider) {
-	fmt.Fprintf(out, "usage: %s [-c key=value ...] [-raw] [-h]\n\n", name)
+	fmt.Fprintf(out, "usage: %s [-c key=value ...] [-raw] [-V] [-h]\n\n", name)
 	fmt.Fprintln(out, "flags:")
 	fmt.Fprintln(out, "  -c key=value   set an agentkit config value (repeatable); see config keys via /help at runtime")
 	fmt.Fprintln(out, "  -raw           emit the raw, undecorated message stream")
+	fmt.Fprintln(out, "  -V, --version   show the version and exit")
 	fmt.Fprintln(out, "  -h, -help      show this catalog and exit")
 	fmt.Fprintln(out)
 

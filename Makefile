@@ -8,7 +8,7 @@ build: $(BIN_DIR)/$(BINARY)
 
 $(BIN_DIR)/$(BINARY): go.mod go.sum $(shell find cmd internal -name '*.go')
 	install -d $(BIN_DIR)
-	go build -o $(BIN_DIR)/$(BINARY) ./cmd/agentrepl
+	go build -ldflags "-X main.version=$(shell git describe --tags --always --dirty)" -o $(BIN_DIR)/$(BINARY) ./cmd/agentrepl
 
 fmt:
 	go fmt ./...

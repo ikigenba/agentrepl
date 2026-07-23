@@ -1,8 +1,9 @@
-usage: agentrepl-test [-c key=value ...] [-raw] [-h]
+usage: agentrepl-test [-c key=value ...] [-raw] [-V] [-h]
 
 flags:
   -c key=value   set an agentkit config value (repeatable); see config keys via /help at runtime
   -raw           emit the raw, undecorated message stream
+  -V, --version   show the version and exit
   -h, -help      show this catalog and exit
 
 defaults:

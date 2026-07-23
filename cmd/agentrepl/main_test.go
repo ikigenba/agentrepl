@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,5 +89,67 @@ func TestRunReportsWorkingDirectoryFailureAsStartupFatal(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "startup: working dir:") {
 		t.Fatalf("stderr = %q, want working-directory startup error", errOut.String())
+	}
+}
+
+func TestRunVersionReportsUnstampedVersionAndShortCircuits(t *testing.T) {
+	// R-S45L-UT0N
+	if version != "dev" {
+		t.Fatalf("unstamped version = %q, want dev", version)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"-V", "-c", "not-a-key-value"}, strings.NewReader("this must not run\n"), &out, &errOut, false)
+	if code != 0 {
+		t.Fatalf("run exit code = %d, want 0; stderr = %q", code, errOut.String())
+	}
+	if got := out.String(); got != "dev\n" {
+		t.Fatalf("stdout = %q, want %q", got, "dev\n")
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", errOut.String())
+	}
+}
+
+func TestRunVersionAliasesMatchShortFlag(t *testing.T) {
+	// R-S6LE-MCI1
+	for _, flag := range []string{"--version", "-version"} {
+		t.Run(flag, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			code := run([]string{flag}, strings.NewReader("this must not run\n"), &out, &errOut, false)
+			if code != 0 {
+				t.Fatalf("run exit code = %d, want 0; stderr = %q", code, errOut.String())
+			}
+			if got := out.String(); got != "dev\n" {
+				t.Fatalf("stdout = %q, want %q", got, "dev\n")
+			}
+			if errOut.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", errOut.String())
+			}
+		})
+	}
+}
+
+func TestVersionLinkerSeamStampsRealBinary(t *testing.T) {
+	// R-S5DI-8KRC
+	const sentinel = "v9.8.7-linker-test"
+	binary := filepath.Join(t.TempDir(), "agentrepl")
+	build := exec.Command("go", "build", "-ldflags", "-X main.version="+sentinel, "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building stamped binary: %v\n%s", err, output)
+	}
+
+	cmd := exec.Command(binary, "-V")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("running stamped binary: %v; stderr = %q", err, stderr.String())
+	}
+	if got := stdout.String(); got != sentinel+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, sentinel+"\n")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }

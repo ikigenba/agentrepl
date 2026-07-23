@@ -66,3 +66,16 @@ func TestWriteHelpMarksMatchingRangeSentinelWithoutTrailingDefault(t *testing.T)
 		t.Fatalf("help output = %q, contains trailing default for a starred sentinel", help)
 	}
 }
+
+func TestWriteHelpNamesVersionFlags(t *testing.T) {
+	// R-S7TB-048Q
+	var out bytes.Buffer
+	WriteHelp(&out, "agentrepl", nil)
+	help := out.String()
+	if !strings.Contains(help, "flags:\n") {
+		t.Fatalf("help output = %q, want flags block", help)
+	}
+	if !strings.Contains(help, "-V, --version") {
+		t.Fatalf("help output = %q, want both version flags", help)
+	}
+}
