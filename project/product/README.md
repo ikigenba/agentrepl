@@ -33,6 +33,7 @@ agentrepl covers:
 - **Token-usage and dollar-cost reporting** surfaced from agentkit, at a cadence that depends on the rendering: in the decorated view, cumulatively — on demand and automatically when the session ends; in the raw view, per turn.
 - **Two rendering formats** for what the operator sees: a decorated human-readable transcript and a raw, undecorated stream of the underlying messages.
 - **An always-on session log**: every run records its complete raw exchange to a per-session file for after-the-fact inspection.
+- **A reported version and a one-line install.** agentrepl reports its own version on request; a build cut from a release tag reports that semver tag, an unstamped build reports a `dev` sentinel, and no version string is hand-maintained in the source. The binary is distributable as a prebuilt release: a released version is cut by pushing a `vMAJOR.MINOR.PATCH` tag, and the published binary is installable with a single shell command (building from source stays available for developers).
 
 It deliberately does **nothing else.** In particular:
 
@@ -54,6 +55,7 @@ These fixed, promised values the design must use verbatim and never re-declare:
 - **Credential variables:** one environment variable per provider, of the form `PROVIDER_API_KEY` — `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`.
 - **Subscription auth file:** defaults to `~/.agentrepl/auth.json`; its location is a config setting (`auth_file`), so a file created elsewhere by `oauth-login` can be pointed at instead.
 - **Session log location:** `~/.agentrepl/logs/<session-id>.jsonl`, one file per run — agentrepl's on-disk footprint lives entirely under `~/.agentrepl/`.
+- **Release version scheme:** released versions are named by semver git tags of the form `vMAJOR.MINOR.PATCH`; a build with no injected version reports the literal `dev`; no version number is maintained by hand anywhere in the sources — the git tag is the sole source of truth.
 
 ## What we promise (user-facing behavior)
 
@@ -95,6 +97,10 @@ These fixed, promised values the design must use verbatim and never re-declare:
 
 - **Errors are shown, not swallowed.** When agentkit returns an error — a transient failure exhausted by retries, an unreachable provider, an invalid configuration, a rejected pass-through setting — agentrepl surfaces it visibly and the REPL stays usable. Automatic retrying of transient and rate-limit failures is agentkit's behavior; the operator simply sees the outcome.
 
+- **Ask for the version; get the build's identity.** `agentrepl -V` (or `--version`) prints the version and exits without starting a session. A build cut from a release tag prints that tag (e.g. `v0.1.0`); a build between tags or from modified sources says so; a build with no version information prints `dev`. The version is never hand-maintained in source — it identifies the exact commit the binary was built from.
+
+- **Install with one command.** A prebuilt release binary can be fetched onto the PATH with a single shell command, no Go toolchain required; the latest release installs by default and a specific version can be pinned. Building from source stays available for developers who want it.
+
 ## Success criteria (outcomes)
 
 The verification gate runs the built agentrepl against exactly this list:
@@ -121,3 +127,4 @@ The verification gate runs the built agentrepl against exactly this list:
 - Every run writes its complete raw exchange to `~/.agentrepl/logs/<session-id>.jsonl` regardless of the chosen rendering, and that file reflects the conversation that occurred.
 - Clearing in-session history via the runtime command starts a fresh conversation within the same process; agentrepl never resumes a prior session from disk.
 - When agentkit returns an error, agentrepl surfaces it visibly and the REPL remains usable for the next input.
+- Running `agentrepl -V` or `agentrepl --version` prints the version and exits cleanly without starting a session: a release-tagged build prints its `vMAJOR.MINOR.PATCH` tag, and an unstamped build prints `dev`.

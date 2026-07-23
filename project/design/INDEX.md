@@ -30,6 +30,8 @@ One line per Decision, in number order — file, label, and the Verification ids
   - ids: R-6DZ8-F5IK, R-6F74-SX99, R-6HMX-KGQN
 - **D14** `project/design/D14.md` — Subscription auth, the external login, and lazy credential failure
   - ids: R-E6D8-E6BS, R-5GQE-9ANG, R-E7L4-RY2H
+- **D15** `project/design/D15.md` — Versioning, version reporting (`-V`/`--version`) & release distribution
+  - ids: R-S45L-UT0N, R-S5DI-8KRC, R-S6LE-MCI1, R-S7TB-048Q
 
 ## Verification ids → Decision
 Every minted id, sorted, mapped to its Decision and file (grep target for id lookup).
@@ -122,5 +124,9 @@ R-OSFJ-PSI8  D7  project/design/D07.md
 R-OUVC-HBZM  D7  project/design/D07.md
 R-OW38-V3QB  D7  project/design/D07.md
 R-Q52T-PXCR  D5  project/design/D05.md
+R-S45L-UT0N  D15  project/design/D15.md
+R-S5DI-8KRC  D15  project/design/D15.md
+R-S6LE-MCI1  D15  project/design/D15.md
+R-S7TB-048Q  D15  project/design/D15.md
 R-W3MV-WRJ7  D10  project/design/D10.md
 R-W4US-AJ9W  D10  project/design/D10.md
